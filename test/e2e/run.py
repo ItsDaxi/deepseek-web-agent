@@ -443,6 +443,27 @@ def run(context, server):
     pause(2)
     check("a closed notice stays closed after a reload", "Update available" not in shadow.text())
 
+    # A repeat lookup, an hour later, only asks whether the release changed.
+    worker.evaluate("""() => {
+        globalThis.__seen = [];
+        globalThis.fetch = async (url, options) => {
+            const condition = options.headers['If-None-Match'];
+            globalThis.__seen.push(condition || null);
+            return condition ? new Response(null, { status: 304 }) : new Response(JSON.stringify({ tag_name: 'v9.0.0' }), { status: 200, headers: { ETag: '"abc"' } });
+        };
+        return 0;
+    }""")
+    worker.evaluate("chrome.storage.local.remove('updateCheck')")
+    page.reload()
+    pause(2)
+    worker.evaluate("chrome.storage.local.get('updateCheck').then(({ updateCheck }) => chrome.storage.local.set({ updateCheck: { ...updateCheck, checkedAt: 0 } }))")
+    page.reload()
+    pause(2)
+    seen = worker.evaluate("globalThis.__seen")
+    check("a repeat lookup is conditional", seen == [None, '"abc"'], str(seen))
+    check("a 304 keeps the known release", (stored("updateCheck") or {}).get("tag") == "v9.0.0")
+    shadow = Shadow(page, context)
+
     # Losing the extension must never look like nothing happened.
     type_message(page, "run a slow command")
     wait_until(lambda: len(shadow.actions("run")) == 1, message="run button")

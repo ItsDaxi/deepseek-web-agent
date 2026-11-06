@@ -6,11 +6,11 @@ importScripts('lib/update-check.js');
 const HOST_NAME = 'com.dsx.shell_host';
 const ALLOWED_ORIGIN = 'https://chat.deepseek.com';
 const MAX_DIAGNOSTICS = 30;
-// The release is looked up at most twice a day, or once an hour after a failed try. GitHub
-// allows 60 requests an hour per address without logging in, so this stays far below it.
-const UPDATE_CHECK_EVERY_MS = 12 * 60 * 60 * 1000;
-const UPDATE_RETRY_AFTER_FAILURE_MS = 60 * 60 * 1000;
+// The release is looked up at most once an hour, a failed try included. GitHub allows 60 requests an
+// hour per address without logging in, so this stays far below it.
+const UPDATE_CHECK_EVERY_MS = 60 * 60 * 1000;
 const UPDATE_FETCH_TIMEOUT_MS = 8000;
+const MAX_ETAG_CHARS = 200;
 
 const tabPorts = new Set();
 const jobOwners = new Map();
@@ -89,32 +89,37 @@ function connectHost() {
 
 let updateLookup = null;
 
-async function fetchLatestTag() {
+// `previous` is the last answer. With its ETag, a repeat lookup is a conditional request: GitHub
+// replies 304 when the release has not changed, and does not count that against its rate limit.
+async function fetchLatestTag(previous) {
+  const headers = { Accept: 'application/vnd.github+json' };
+  if (previous && previous.tag && previous.etag) headers['If-None-Match'] = previous.etag;
   const response = await fetch(DsxUpdateCheck.API_URL, {
-    headers: { Accept: 'application/vnd.github+json' },
+    headers,
     cache: 'no-store',
     signal: AbortSignal.timeout(UPDATE_FETCH_TIMEOUT_MS),
   });
+  if (response.status === 304 && previous && previous.tag) return { tag: previous.tag, etag: previous.etag };
   if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
   const { tag_name: tag } = await response.json();
   // A tag that is not a plain version is ignored rather than trusted.
   if (!DsxUpdateCheck.parseVersion(tag)) throw new Error('The latest release has no usable version.');
-  return tag;
+  const etag = response.headers.get('ETag');
+  return { tag, etag: etag && etag.length <= MAX_ETAG_CHARS ? etag : null };
 }
 
 async function lookUpLatestTag() {
   const { updateCheck } = await chrome.storage.local.get({ updateCheck: null });
   const age = updateCheck ? Date.now() - updateCheck.checkedAt : Infinity;
-  const wait = updateCheck && updateCheck.failed ? UPDATE_RETRY_AFTER_FAILURE_MS : UPDATE_CHECK_EVERY_MS;
-  if (age < wait) return updateCheck.tag;
+  if (age < UPDATE_CHECK_EVERY_MS) return updateCheck.tag;
 
   let entry;
   try {
-    entry = { checkedAt: Date.now(), tag: await fetchLatestTag(), failed: false };
+    entry = { checkedAt: Date.now(), ...(await fetchLatestTag(updateCheck)), failed: false };
   } catch (error) {
     logDiagnostic('update-check-failed', error.message);
-    // The last known tag stays, so a short outage does not hide an update already found.
-    entry = { checkedAt: Date.now(), tag: updateCheck ? updateCheck.tag : null, failed: true };
+    // The last known release stays, so a short outage does not hide an update already found.
+    entry = { checkedAt: Date.now(), tag: updateCheck ? updateCheck.tag : null, etag: updateCheck ? updateCheck.etag : null, failed: true };
   }
   await chrome.storage.local.set({ updateCheck: entry });
   return entry.tag;
