@@ -463,6 +463,9 @@ function handle(message) {
       send({
         type: 'hello',
         version: VERSION,
+        // What this host can do beyond running commands, so an extension newer than the host can say so
+        // instead of waiting for an answer that never comes.
+        features: ['read-prompt'],
         extensionVersion: extensionVersion(),
         platform: process.platform,
         defaultShell: defaultShell(),

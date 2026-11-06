@@ -68,8 +68,16 @@
   // Asks the host for the file. Resolves with its answer, or with an error if it never comes.
   function readPromptFile() {
     return new Promise((resolve) => {
-      if (!port) {
+      if (!port || !hostInfo) {
         resolve({ text: null, error: 'The shell host is not connected.' });
+        return;
+      }
+      // An older host ignores the request and never answers, so it is named instead of waited for.
+      if (!(hostInfo.features || []).includes('read-prompt')) {
+        resolve({
+          text: null,
+          error: 'The installed shell host is older than this extension and cannot read evil.txt. Run the setup again, or node host/install.js in the project folder, then restart the browser.',
+        });
         return;
       }
       const id = `prompt-${Date.now()}`;

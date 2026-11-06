@@ -69,6 +69,7 @@ test('hello reports the environment', async () => {
   // The host names the version of the extension files beside it, so the browser can tell when it is behind.
   const { version } = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'extension', 'manifest.json'), 'utf8'));
   assert.equal(hello.extensionVersion, version);
+  assert.ok(hello.features.includes('read-prompt'));
   host.stop();
 });
 
