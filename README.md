@@ -80,7 +80,7 @@ A command answers in a small panel above the composer, which closes by itself or
 
 `/evil` takes no arguments: it switches. The square flame button next to "New chat" in the sidebar does the same, and turns red while it is on. The first time it reads the file and turns the feature on, and the next time it turns it off. The text goes out with your next message in each chat, once, and again only if it changes. It sits in a hidden block, so it never shows in the chat, and `/evil` never prints it back, only its size. The file is read again every time the page loads, so after editing it reload the page. Turning it off tells a chat that already has the text to ignore it. The file has no size limit of its own: a long text travels from the host to the extension in pieces and is joined again. DeepSeek has a limit on the length of a message that this extension cannot see, so above 100,000 characters `/evil` warns you that DeepSeek may refuse it. Only that one file is read, and the text is never taken from the web.
 
-While `/evil` is on the page wears the red look: the blue of DeepSeek becomes red, and the logo in the sidebar and the whale on an empty chat are replaced by your own (`extension/logos.css` and `extension/evil.css`). Turning `/evil` on plays a 1.8 second animation (`extension/evil-awakening.js`): the page tears into horizontal slices and splits into red, green and blue with static and two flickers; a red scan line then turns the page red from the top; at the activation the red theme switches on with a flash, the greeting scrambles into another one, the new logos land and the composer glows; then everything dies out and the clean red page is left. Turning it off brings the original look back at once.
+While `/evil` is on the page wears the red look: the blue of DeepSeek becomes red, and the logo in the sidebar and the whale on an empty chat are replaced by your own (`extension/logos.css` and `extension/evil.css`). Turning `/evil` on plays a short transition (`extension/evil-awakening.js`, one second): a flickering full-screen glitch of pixel blocks in purple, magenta, blue and black covers the page, the red theme switches on underneath, then the glitch breaks up while the new logos fade in. While it is on, the greeting on an empty chat is one of five tougher lines (`extension/evil-greeting.js`) instead of DeepSeek's own. Turning it off brings the original look and greeting back at once.
 
 ### Update notice
 
@@ -134,6 +134,7 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/content.js` | Approval decisions, the life of each command, and changes to the page |
 | `extension/cards.js` | Draws the tool cards |
 | `extension/evil-awakening.js` | The animation played when `/evil` is turned on |
+| `extension/evil-greeting.js` | The tougher greetings on an empty chat while `/evil` is on |
 | `extension/page-controls.js` | The status pill, the composer buttons, the context meter, tooltips and the mode animation |
 | `extension/think-collapse.js` | Keeps the thinking blocks collapsed |
 | `extension/background.js` | Connects tabs to the native host |

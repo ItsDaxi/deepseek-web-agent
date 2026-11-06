@@ -105,8 +105,15 @@
   // The red theme and the evil logos (evil.css, logos.css) show only while /evil is on, so turning it
   // off brings the originals back. Turning it on plays the awakening animation first, which switches
   // the look on itself at the right moment; the library is optional so a missing file only skips it.
+  // The tougher greetings on an empty chat (evil-greeting.js) come and go with the look.
+  const greeting = globalThis.DsxEvilGreeting
+    ? globalThis.DsxEvilGreeting.createEvilGreeting()
+    : { start() {}, stop() {} };
+
   function showEvilLook() {
-    if (settings.evilOn) document.documentElement.setAttribute('data-dsx-evil', '');
+    if (!settings.evilOn) return;
+    document.documentElement.setAttribute('data-dsx-evil', '');
+    greeting.start();
   }
 
   const awakening = globalThis.DsxEvilAwakening
@@ -116,6 +123,8 @@
   function applyEvilLook() {
     if (settings.evilOn && awakening.isPlaying()) return;
     document.documentElement.toggleAttribute('data-dsx-evil', Boolean(settings.evilOn));
+    if (settings.evilOn) greeting.start();
+    else greeting.stop();
   }
 
   chrome.storage.local.get(DEFAULT_SETTINGS).then((stored) => {

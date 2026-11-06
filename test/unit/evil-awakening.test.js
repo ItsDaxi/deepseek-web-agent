@@ -2,43 +2,80 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { scrambleText, otherGreeting } = require('../../extension/evil-awakening.js');
+const { createEvilAwakening, drawGlitch, coverageAt } = require('../../extension/evil-awakening.js');
 
-const fixed = (value) => () => value;
+// A canvas context that only records what is drawn.
+function fakeContext() {
+  const calls = { rects: [], clears: 0 };
+  return {
+    calls,
+    clearRect: () => { calls.clears += 1; },
+    fillRect: (x, y, w, h) => calls.rects.push({ x, y, w, h, fill: undefined }),
+    createLinearGradient: () => ({ addColorStop() {} }),
+    fillStyle: '',
+  };
+}
 
-test('the greeting resolves from left to right and keeps its spaces', () => {
-  const text = "Hi! What's on";
-  assert.equal(scrambleText(text, 1), text);
-  assert.equal(scrambleText(text, 5), text);
-  const half = scrambleText(text, 0.5, fixed(0));
-  assert.equal(half.length, text.length);
-  assert.equal(half.slice(0, 6), "Hi! Wh");
-  assert.equal(half[3], ' ');
-  assert.ok(!half.slice(6).includes('a'), 'the rest is noise');
-  const none = scrambleText(text, 0, fixed(0));
-  assert.equal(none.length, text.length);
-  assert.equal([...none].filter((char) => char === ' ').length, 2);
-  assert.notEqual(none, text);
+test('the glitch covers the screen at first, more and more, then nothing at the end', () => {
+  assert.ok(coverageAt(0) > 0 && coverageAt(0) < 1);
+  assert.ok(coverageAt(150) > coverageAt(0));
+  assert.equal(coverageAt(450), 1);
+  assert.ok(coverageAt(800) < 1 && coverageAt(800) > 0);
+  assert.equal(coverageAt(1000), 0);
+  assert.equal(coverageAt(5000), 0);
 });
 
-test('noise only uses the glyph set and never changes the length', () => {
-  for (let step = 0; step <= 10; step += 1) {
-    const out = scrambleText('Hello, let\'s start chatting', step / 10);
-    assert.equal(out.length, 'Hello, let\'s start chatting'.length);
-  }
+test('a full frame is detailed and spans the whole height and width', () => {
+  const context = fakeContext();
+  drawGlitch(context, 1280, 720, 1);
+  assert.ok(context.calls.rects.length > 300, `only ${context.calls.rects.length} shapes`);
+  const bottom = Math.max(...context.calls.rects.map((rect) => rect.y + rect.h));
+  assert.ok(bottom >= 720, 'the bands reach the bottom of the screen');
+  assert.equal(Math.min(...context.calls.rects.map((rect) => rect.x)), 0);
 });
 
-test('a new greeting comes from DeepSeek\'s own list and is never the one on screen', () => {
-  const state = JSON.stringify({
-    entries: { welcome_msg: { id: 1, value: { messages: [{ id: 0, text: 'Hi. How can I help?' }, { id: 1, text: 'Hello, let\'s start chatting' }, { id: 2, text: 'Whenever you\'re ready' }] } } },
+test('with no coverage nothing but the thin lines is left to draw', () => {
+  const context = fakeContext();
+  drawGlitch(context, 1280, 720, 0);
+  assert.equal(context.calls.rects.length, 0);
+});
+
+test('without a page to draw on the look is switched on at once', () => {
+  let activations = 0;
+  const awakening = createEvilAwakening({ onActivate: () => { activations += 1; } });
+  awakening.play();
+  assert.equal(activations, 1);
+  assert.equal(awakening.isPlaying(), false);
+});
+
+test('with a page the look is switched on once, under the glitch, and the overlay is removed', async () => {
+  const noop = () => {};
+  const element = () => ({
+    className: '',
+    style: {},
+    append: noop,
+    animate: noop,
+    getContext: fakeContext,
+    remove() { this.removed = true; },
+    attachShadow() { return { append: noop }; },
   });
-  for (const pick of [0, 0.5, 0.99]) {
-    const greeting = otherGreeting('Hello, let\'s start chatting', state, fixed(pick));
-    assert.ok(['Hi. How can I help?', 'Whenever you\'re ready'].includes(greeting), greeting);
+  const body = element();
+  const hosts = [];
+  body.append = (node) => hosts.push(node);
+  globalThis.document = { body, createElement: element, querySelector: () => null };
+  try {
+    let activations = 0;
+    const awakening = createEvilAwakening({ onActivate: () => { activations += 1; } });
+    awakening.play();
+    awakening.play();
+    assert.equal(awakening.isPlaying(), true);
+    assert.equal(activations, 0, 'the theme is not switched before the screen is covered');
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    assert.equal(activations, 1);
+    assert.equal(awakening.isPlaying(), false);
+    assert.equal(hosts.length, 1);
+    assert.equal(hosts[0].removed, true);
+  } finally {
+    delete globalThis.document;
   }
-  assert.equal(otherGreeting('x', JSON.stringify({ entries: {} }), fixed(0)), null);
-  assert.equal(otherGreeting('x', 'not json', fixed(0)), null);
-  assert.equal(otherGreeting('x', null, fixed(0)), null);
-  const only = JSON.stringify({ entries: { welcome_msg: { value: { messages: [{ text: 'same' }] } } } });
-  assert.equal(otherGreeting('same', only, fixed(0)), null);
 });
