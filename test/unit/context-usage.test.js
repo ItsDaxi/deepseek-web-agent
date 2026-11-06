@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { latestUsage, contextLimit, formatTokens } = require('../../extension/lib/context-usage.js');
+const { latestUsage, contextLimit, storedContextLimit, formatTokens } = require('../../extension/lib/context-usage.js');
 const { createSseRewriter, rewriteHistory } = require('../../extension/lib/stream-filter.js');
 
 test('token counts are shortened to a few characters', () => {
@@ -37,6 +37,17 @@ test('the limit is the smaller token limit of the model the chat opens with', ()
   assert.equal(contextLimit(payload([])), null);
   assert.equal(contextLimit({ data: { biz_data: null } }), null);
   assert.equal(contextLimit(null), null);
+});
+
+test('the limit can also be read from the copy the page keeps in localStorage', () => {
+  const stored = JSON.stringify({
+    schemaVersion: 2,
+    entries: { model_configs: { id: 1, value: [{ model_type: 'default', enabled: true, is_default: true, file_feature: { token_limit: 890880, token_limit_with_thinking: 890880 } }] } },
+  });
+  assert.equal(storedContextLimit(stored), 890880);
+  assert.equal(storedContextLimit('{"entries":{}}'), null);
+  assert.equal(storedContextLimit('not json'), null);
+  assert.equal(storedContextLimit(null), null);
 });
 
 test('the usage of a chat is the total after its newest message', () => {

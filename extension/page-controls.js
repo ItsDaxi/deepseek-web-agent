@@ -414,10 +414,10 @@
       meterLabel.textContent = known ? `${formatTokens(count)} / ${formatTokens(limit)}` : formatTokens(count);
       meterArc.setAttribute('stroke-dasharray', `${(ratio * 100).toFixed(1)} 100`);
       meterBox.className = ['meter', ratio >= METER_FULL_RATIO ? 'full' : ratio >= METER_WARN_RATIO ? 'warn' : ''].join(' ').trim();
-      meterBox.setAttribute('aria-label', known ? `Context used: ${grouped(count)} of ${grouped(limit)} tokens` : `Context used: ${grouped(count)} tokens`);
       tips.context = known
-        ? `Context used: ${grouped(count)} of ${grouped(limit)} tokens (${(ratio * 100).toFixed(ratio < 0.1 ? 1 : 0)}%)\nCounted by DeepSeek`
-        : `Context used: ${grouped(count)} tokens\nCounted by DeepSeek`;
+        ? `Context: ${grouped(count)} / ${grouped(limit)} tokens (${(ratio * 100).toFixed(ratio < 0.1 ? 1 : 0)}%)`
+        : `Context: ${grouped(count)} tokens`;
+      meterBox.setAttribute('aria-label', tips.context);
       tooltip.refresh();
     }
 

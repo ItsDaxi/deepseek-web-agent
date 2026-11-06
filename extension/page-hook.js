@@ -16,6 +16,8 @@
   ];
   const HISTORY_PATH = '/api/v0/chat/history_messages';
   const SETTINGS_PATH = '/api/v0/client/settings';
+  const MODEL_STORE_KEY = '__ds_remote_feature_store_model';
+  const STORE_READ_DELAY_MS = 500;
   const TITLE_PATH = '/api/v0/chat_session/update_title';
   const RESULT_MARKER = new RegExp(`^${Protocol.RESULT_MARKER_PREFIX}(\\S+)$`);
   const LEAKED_TITLE = /\b(dsx|shell tool|tool syntax|system prompt)\b/i;
@@ -140,11 +142,30 @@
     try {
       const payload = xhr.responseType === 'json' ? nativeResponse.call(xhr) : JSON.parse(nativeResponseText.call(xhr));
       const tokens = ContextUsage.contextLimit(payload);
+      if (tokens) {
+        post({ type: 'context-limit', tokens });
+        return;
+      }
+    } catch {
+      // Not the answer expected.
+    }
+    // The page saves its settings after it reads this answer, so its copy is read a moment later.
+    setTimeout(reportStoredLimit, STORE_READ_DELAY_MS);
+  }
+
+  // The page keeps its model settings in localStorage and often does not download them again, so
+  // that copy is the usual source of the limit. Reading it changes nothing.
+  function reportStoredLimit() {
+    try {
+      const tokens = ContextUsage.storedContextLimit(localStorage.getItem(MODEL_STORE_KEY));
       if (tokens) post({ type: 'context-limit', tokens });
     } catch {
-      // Not the answer expected. The page keeps working and the meter just shows no limit.
+      // Storage is unavailable. The meter just shows no limit.
     }
   }
+
+  reportStoredLimit();
+  document.addEventListener('DOMContentLoaded', reportStoredLimit);
 
   // ---- Stream responses ----------------------------------------------------------------------
 
