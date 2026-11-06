@@ -1,6 +1,6 @@
 {
   "name": "deepseek-web-agent",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "description": "Unofficial Chromium extension that gives the DeepSeek web chat file and shell tools.",
