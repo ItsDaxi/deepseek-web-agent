@@ -9,6 +9,7 @@
     shield: '<path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3"/><path d="M9 12l2 2l4 -4"/>',
     bolt: '<path d="M13 3v7h6l-8 11v-7h-6l8 -11"/>',
     arrowUp: '<path d="M12 19v-14"/><path d="M18 11l-6 -6l-6 6"/>',
+    flame: '<path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z"/>',
   };
 
   const BUTTON_STYLES = `
@@ -27,10 +28,45 @@
     button.selected:hover { background-color: var(--dsw-alias-button-ghost-active-hover, rgba(86,134,254,.18)); }
     button.danger { color: var(--dsw-alias-state-error-primary, #f25a5a); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 55%, transparent); background-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 12%, transparent); }
     button.danger:hover { background-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 20%, transparent); }
+    /* With /evil on, the folder button (when a folder is chosen) matches Bypass and the red toggles. */
+    :host-context(html[data-dsx-evil]) button.selected { color: var(--dsw-alias-state-error-primary, #f25a5a); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 55%, transparent); background-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 12%, transparent); }
+    :host-context(html[data-dsx-evil]) button.selected:hover { background-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 20%, transparent); }
     button.busy { opacity: .4; cursor: progress; }
     svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     @media (prefers-reduced-motion: reduce) { button { transition: none; } }
   `;
+
+  // The Evil Mode button, a square next to "New chat" in the sidebar. It takes the height of the row,
+  // so it stays square whatever size DeepSeek gives that button. Off it is a quiet filled square; on it
+  // looks like the Bypass button.
+  const EVIL_BUTTON_STYLES = `
+    :host { display: flex; flex: none; align-self: stretch; aspect-ratio: 1 / 1; min-width: 34px; }
+    button {
+      box-sizing: border-box; width: 100%; height: 100%; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+      border-radius: 12px; cursor: pointer; user-select: none; outline: none; font: inherit; position: relative;
+      color: var(--dsw-alias-label-secondary, #cfd3d6); border: 1px solid transparent;
+      background: color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 10%, transparent);
+      transition: background .2s ease, border .2s ease, color .2s ease;
+    }
+    button:hover { color: var(--dsw-alias-label-primary, #f9fafb); background: color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 18%, transparent); }
+    button:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); }
+    button.on { color: var(--dsw-alias-state-error-primary, #f25a5a); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 55%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 12%, transparent); }
+    button.on:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 20%, transparent); }
+    button.busy { opacity: .4; cursor: progress; }
+    svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+  `;
+
+  // The row of the "New chat" button, found from the logo above it instead of from DeepSeek's class
+  // names: the logo's row is followed by the row that holds the button. Null when the sidebar is not
+  // laid out like that, and then the Evil Mode button is simply not shown.
+  function findNewChatRow() {
+    const logo = document.querySelector('svg[viewBox="0 0 143 23"]');
+    const header = logo && logo.parentElement && logo.parentElement.parentElement;
+    const row = header && header.nextElementSibling;
+    const button = row && row.firstElementChild;
+    return button && button.querySelector('[tabindex]') ? row : null;
+  }
 
   // The context meter, left of the attach button: a ring and "used / limit" in tokens. It is not a
   // button, so it has no hover fill; it turns amber and then red as the chat fills up.
@@ -321,7 +357,7 @@
     return null;
   }
 
-  function createPageControls({ onPickFolder, onChangeMode, onDismissUpdate }) {
+  function createPageControls({ onPickFolder, onChangeMode, onDismissUpdate, onToggleEvil }) {
     const pill = attach(
       'dsx-status',
       PILL_STYLES,
@@ -348,6 +384,9 @@
     const meterArc = meter.shadow.querySelector('.arc');
     const meterLabel = meter.shadow.querySelector('span');
 
+    const evil = attach('dsx-evil-button', EVIL_BUTTON_STYLES, `<button type="button" data-action="toggle-evil">${iconMarkup('flame')}</button>`);
+    const evilButton = evil.shadow.querySelector('button');
+
     const pillBox = pill.shadow.querySelector('.status');
     const folderButton = folder.shadow.querySelector('button');
     const permissionButton = permission.shadow.querySelector('button');
@@ -355,8 +394,9 @@
     const wave = createWave();
     let mode = 'ask';
     // What each tooltip says right now. The tooltips read it when they show, and update() fills it in.
-    const tips = { pill: '', folder: '', permission: '', context: '', update: 'Open the release page. Run the new setup and the extension updates itself.' };
+    const tips = { pill: '', folder: '', permission: '', context: '', evil: '', update: 'Open the release page. Run the new setup and the extension updates itself.' };
     tooltip.bind(meterBox, () => tips.context);
+    tooltip.bind(evilButton, () => tips.evil);
     tooltip.bind(pillBox, () => tips.pill);
     tooltip.bind(updateLink, () => tips.update);
     tooltip.bind(folderButton, () => tips.folder);
@@ -367,6 +407,7 @@
       if (event.isTrusted) handler();
     };
     folderButton.addEventListener('click', trusted(onPickFolder));
+    evilButton.addEventListener('click', trusted(onToggleEvil));
     updateClose.addEventListener('click', trusted(() => onDismissUpdate(updateTag)));
     permissionButton.addEventListener('click', trusted(() => {
       const next = mode === 'bypass' ? 'ask' : 'bypass';
@@ -375,7 +416,7 @@
       onChangeMode(next);
     }));
 
-    function update({ alive, settings, hostInfo, hostError, picking, pickError, update: newerRelease }) {
+    function update({ alive, settings, hostInfo, hostError, picking, pickError, update: newerRelease, evilBusy }) {
       mode = settings.mode;
 
       // The link returns for the next release after the user closes this one. While it is hidden
@@ -396,6 +437,12 @@
       permissionButton.setAttribute('aria-label', `Permissions: ${bypass ? 'bypass' : 'manual'}`);
       tips.permission = bypass ? 'Commands run without asking' : 'Commands ask before running';
       permissionButton.innerHTML = `${iconMarkup(bypass ? 'bolt' : 'shield')}<span>${bypass ? 'Bypass' : 'Manual'}</span>`;
+
+      const evilOn = Boolean(settings.evilOn);
+      evilButton.className = [evilOn ? 'on' : '', evilBusy ? 'busy' : ''].join(' ').trim();
+      evilButton.setAttribute('aria-pressed', String(evilOn));
+      evilButton.setAttribute('aria-label', `Evil Mode: ${evilOn ? 'on' : 'off'}`);
+      tips.evil = evilOn ? 'Evil Mode: on. Click to turn it off.' : 'Evil Mode: off. Click to turn it on.';
 
       folderButton.className = [settings.cwd ? 'selected' : '', picking ? 'busy' : ''].join(' ').trim();
       const location = settings.cwd || (hostInfo && hostInfo.home) || 'your home folder';
@@ -426,6 +473,12 @@
     function mount() {
       if (document.body && !pill.host.isConnected) document.body.append(pill.host);
       if (document.body && !tooltip.host.isConnected) document.body.append(tooltip.host);
+      // The sidebar row. data-dsx-row lets page.css turn it into a row of two, so "New chat" shrinks.
+      const row = findNewChatRow();
+      if (row) {
+        if (!row.hasAttribute('data-dsx-row')) row.setAttribute('data-dsx-row', '');
+        if (evil.host.parentElement !== row) row.append(evil.host);
+      }
       const group = findComposerToggleGroup();
       if (!group) return;
       if (folder.host.parentElement !== group) group.prepend(folder.host);

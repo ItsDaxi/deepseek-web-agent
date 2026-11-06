@@ -102,8 +102,25 @@
     return answer;
   }
 
+  // The red theme and the evil logos (evil.css, logos.css) show only while /evil is on, so turning it
+  // off brings the originals back. Turning it on plays the awakening animation first, which switches
+  // the look on itself at the right moment; the library is optional so a missing file only skips it.
+  function showEvilLook() {
+    if (settings.evilOn) document.documentElement.setAttribute('data-dsx-evil', '');
+  }
+
+  const awakening = globalThis.DsxEvilAwakening
+    ? globalThis.DsxEvilAwakening.createEvilAwakening({ onActivate: showEvilLook })
+    : { play: showEvilLook, isPlaying: () => false };
+
+  function applyEvilLook() {
+    if (settings.evilOn && awakening.isPlaying()) return;
+    document.documentElement.toggleAttribute('data-dsx-evil', Boolean(settings.evilOn));
+  }
+
   chrome.storage.local.get(DEFAULT_SETTINGS).then((stored) => {
     settings = stored;
+    applyEvilLook();
     pushConfig();
     renderControls();
     thinkCollapser.scan();
@@ -113,6 +130,7 @@
     if (area !== 'local') return;
     if (Object.keys(changes).every((key) => !(key in DEFAULT_SETTINGS))) return;
     for (const [key, change] of Object.entries(changes)) settings[key] = change.newValue;
+    applyEvilLook();
     pushConfig();
     renderControls();
     thinkCollapser.scan();
@@ -198,6 +216,7 @@
         renderControls();
         if (hostInfo) runApprovedCommands();
         // The file is read again each time the host connects, so an edit takes effect on a reload.
+        // A page that just loaded has no text yet, so a reload reads evil.txt again.
         if (hostInfo && settings.evilOn && !extraPrompt) loadExtraPrompt();
         break;
       case 'started':
@@ -683,7 +702,26 @@
     onPickFolder: startFolderPick,
     onChangeMode: (mode) => saveSettings({ mode }),
     onDismissUpdate: (tag) => saveSettings({ dismissedUpdate: tag }),
+    onToggleEvil: toggleEvilFromButton,
   });
+
+  // The Evil Mode button in the sidebar does what /evil does and answers in the same small panel.
+  let evilBusy = false;
+
+  async function toggleEvilFromButton() {
+    if (evilBusy) return;
+    evilBusy = true;
+    renderControls();
+    try {
+      const answer = await toggleEvil();
+      if (answer && answer.lines && answer.lines.length) slashCommands.showMessage(answer.lines, answer.error);
+    } catch (error) {
+      slashCommands.showMessage([error && error.message ? error.message : 'Evil Mode failed.'], true);
+    } finally {
+      evilBusy = false;
+      renderControls();
+    }
+  }
 
   function renderControls() {
     controls.update({
@@ -694,6 +732,7 @@
       picking: Boolean(folderRequest),
       pickError: folderError,
       update: updateInfo,
+      evilBusy,
     });
   }
 
@@ -736,8 +775,24 @@
     return text.length > LONG_PROMPT_CHARS ? `${size}, which is very long: DeepSeek may refuse a message this size` : size;
   }
 
-  const PREVIEW_LINES = 6;
-  const PREVIEW_LINE_CHARS = 110;
+  // Turns the user's own instructions on or off. The /evil command and the Evil Mode button both do this.
+  async function toggleEvil() {
+    if (settings.evilOn) {
+      saveSettings({ evilOn: false });
+      extraPrompt = null;
+      pushConfig();
+      // Turning it off says nothing: the button and the original look already show it.
+      return { lines: [] };
+    }
+    const answer = await loadExtraPrompt();
+    if (!answer.text) return { error: true, lines: describePromptProblem(answer) };
+    saveSettings({ evilOn: true });
+    // Settings reach this script a moment later, so the look is switched on by the animation.
+    settings.evilOn = true;
+    awakening.play();
+    // Turning it on says nothing either, except when the text is so long that DeepSeek may refuse it.
+    return { lines: answer.text.length > LONG_PROMPT_CHARS ? [`On: ${describePromptSize(answer.text)} from evil.txt.`] : [] };
+  }
 
   const SLASH_COMMANDS = [
     {
@@ -805,41 +860,10 @@
     },
     {
       name: 'evil',
-      description: 'Add your own instructions from evil.txt to the hidden prompt',
-      // Showing comes first, so a careless Enter right after "/evil " only reads.
-      args: [
-        { value: 'show', description: 'Show the file, and whether it is on' },
-        { value: 'on', description: 'Add it to your next message in each chat' },
-        { value: 'off', description: 'Stop adding it' },
-        { value: 'reload', description: 'Read the file again after editing it' },
-      ],
-      run: async (arg) => {
-        if (arg === 'off') {
-          saveSettings({ evilOn: false });
-          extraPrompt = null;
-          pushConfig();
-          return { lines: ['Your instructions are off. A chat that already has them is told to ignore them.'] };
-        }
-        if (arg === 'show') {
-          const answer = await readPromptFile();
-          const state = `State: ${settings.evilOn ? 'on' : 'off'}`;
-          if (!answer.text) return { error: true, lines: [state, ...describePromptProblem(answer)] };
-          const preview = answer.text.split('\n').filter((line) => line.trim()).slice(0, PREVIEW_LINES)
-            .map((line) => (line.length > PREVIEW_LINE_CHARS ? `${line.slice(0, PREVIEW_LINE_CHARS)}…` : line));
-          return { lines: [state, `File: ${answer.path}`, `Size: ${describePromptSize(answer.text)}`, '', ...preview] };
-        }
-        if (arg === 'on' || arg === 'reload') {
-          const answer = await loadExtraPrompt();
-          if (!answer.text) return { error: true, lines: describePromptProblem(answer) };
-          const size = describePromptSize(answer.text);
-          if (arg === 'reload') {
-            return { lines: [settings.evilOn ? `Reloaded: ${size}.` : `The file reads fine (${size}), but it is off. Use /evil on.`] };
-          }
-          saveSettings({ evilOn: true });
-          return { lines: [`On: ${size} from evil.txt.`, 'They go with your next message in each chat.'] };
-        }
-        return { error: true, lines: ['Use /evil show, on, off or reload.'] };
-      },
+      description: 'Turn your own instructions from evil.txt on or off',
+      // One command, no arguments: it switches. The file is read when it is turned on and again every
+      // time the page loads, so an edit takes effect after a reload. Its text is never printed back.
+      run: toggleEvil,
     },
     {
       name: 'update',
@@ -863,11 +887,12 @@
     },
   ];
 
-  createSlashCommands({
+  const slashCommands = createSlashCommands({
     commands: SLASH_COMMANDS,
     run: (name, arg) => SLASH_COMMANDS.find((command) => command.name === name).run(arg),
     findBox: findComposerBox,
-  }).start();
+  });
+  slashCommands.start();
 
   connect();
 

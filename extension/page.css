@@ -24,3 +24,15 @@ textarea[data-dsx-sending] {
   color: transparent !important;
   caret-color: transparent !important;
 }
+
+/* The sidebar row of "New chat" shares its line with the Evil Mode button: the button keeps the rest. */
+[data-dsx-row] {
+  display: flex !important;
+  align-items: stretch;
+  gap: 8px;
+}
+
+[data-dsx-row] > :first-child {
+  flex: 1 1 0;
+  min-width: 0;
+}

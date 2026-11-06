@@ -1,0 +1,34 @@
+/* The red look while /evil is on. content.js sets data-dsx-evil on <html> then, and removes it when
+   /evil is turned off, so the original blue comes straight back.
+
+   DeepSeek builds its blue from one palette, --dsw-static-deepseek-*, declared on <body>. Every brand
+   colour of the page (the toggles, the send button, links, focus rings) is an alias of a step of that
+   palette, so replacing the palette on <body> turns all of them red without touching a single rule of
+   the page. The steps keep their order from light to dark. */
+html[data-dsx-evil],
+html[data-dsx-evil] body {
+  --dsw-static-deepseek-50: #fff1f2;
+  --dsw-static-deepseek-100: #ffdfe1;
+  --dsw-static-deepseek-200: #ffc2c6;
+  --dsw-static-deepseek-300: #ff9ba1;
+  --dsw-static-deepseek-400: #f25a5a;
+  --dsw-static-deepseek-450: #fc0019;
+  --dsw-static-deepseek-500: #d4001a;
+  --dsw-static-deepseek-600: #a8232f;
+  --dsw-static-deepseek-700-delete: #7a1b24;
+  --dsw-static-deepseek-800: #4f1218;
+  --dsw-static-deepseek-900: #330c10;
+}
+
+/* The composer's toggles (DeepThink, Search) look like the Bypass button: red text, a red border at
+   55% and a red fill at 12%, which is the error colour the extension's own buttons use. DeepSeek
+   builds the selected toggle from these three variables and a hover rule, so only those are set. */
+html[data-dsx-evil] .ds-toggle-button {
+  --dsl-toggle-button-text-color-selected: var(--dsw-alias-state-error-primary, #f25a5a);
+  --dsl-toggle-button-border-color-selected: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 55%, transparent);
+  --dsl-toggle-button-color-selected: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 12%, transparent);
+}
+
+html[data-dsx-evil] .ds-toggle-button.ds-toggle-button--selected:hover:not(.ds-toggle-button--disabled) {
+  background-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 20%, transparent);
+}
