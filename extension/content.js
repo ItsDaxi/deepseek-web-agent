@@ -43,6 +43,11 @@
   // them, and every result goes back together in one message once the whole turn is settled.
   let turn = null;
   const allowedChats = new Set();
+  // The context meter. DeepSeek counts the tokens of each chat and says so at the end of every reply
+  // and in the history of a chat. Nothing is counted here. contextLimit is the most a chat can hold.
+  const chatTokens = new Map();
+  let contextLimit = null;
+  let shownContext = '';
   const WAITING = 'Waiting for the commands before it to finish.';
 
   const store = createCardStore({ onAction: handleAction });
@@ -571,6 +576,18 @@
         break;
       case 'history':
         applyHistory(message);
+        if (message.tokens && message.sessionId) {
+          chatTokens.set(message.sessionId, message.tokens);
+          renderContext();
+        }
+        break;
+      case 'usage':
+        chatTokens.set(message.sessionId, message.tokens);
+        renderContext();
+        break;
+      case 'context-limit':
+        contextLimit = message.tokens;
+        renderContext();
         break;
       case 'result-failed':
         store.set(message.id, { sendFailed: true });
@@ -613,7 +630,23 @@
     decorateCodeBlocks();
     hideResultMessages();
     controls.mount();
+    renderContext();
   }).observe(document, { childList: true, subtree: true, characterData: true });
+
+  // The meter shows the chat that is open. A new chat has no id in its address yet, so it shows 0.
+  function renderContext() {
+    let used = 0;
+    for (const [sessionId, tokens] of chatTokens) {
+      if (location.pathname.includes(sessionId)) {
+        used = tokens;
+        break;
+      }
+    }
+    const key = `${used}/${contextLimit}`;
+    if (key === shownContext) return;
+    shownContext = key;
+    controls.setContext({ used, limit: contextLimit });
+  }
 
   // ---- Status pill ---------------------------------------------------------------------------
 

@@ -127,10 +127,11 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | --- | --- |
 | `extension/lib/protocol.js` | The hidden prompt, the tool syntax and the format of result messages |
 | `extension/lib/stream-filter.js` | Removes tool syntax from the response stream and from the history |
+| `extension/lib/context-usage.js` | Reads the token total DeepSeek counts for a chat, and the model's token limit, for the context meter |
 | `extension/page-hook.js` | Wraps `XMLHttpRequest` and sends results through the page's own composer |
 | `extension/content.js` | Approval decisions, the life of each command, and changes to the page |
 | `extension/cards.js` | Draws the tool cards |
-| `extension/page-controls.js` | The status pill, the composer buttons, tooltips and the mode animation |
+| `extension/page-controls.js` | The status pill, the composer buttons, the context meter, tooltips and the mode animation |
 | `extension/think-collapse.js` | Keeps the thinking blocks collapsed |
 | `extension/background.js` | Connects tabs to the native host |
 | `host/host.js` | Runs commands and tools, streams output, enforces timeouts and kills |

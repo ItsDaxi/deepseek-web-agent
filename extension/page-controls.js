@@ -32,6 +32,26 @@
     @media (prefers-reduced-motion: reduce) { button { transition: none; } }
   `;
 
+  // The context meter, left of the attach button: a ring and "used / limit" in tokens. It is not a
+  // button, so it has no hover fill; it turns amber and then red as the chat fills up.
+  const METER_STYLES = `
+    :host { display: inline-flex; margin-right: 8px; }
+    .meter {
+      box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 11px; border-radius: 18px;
+      font: 500 13px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap; user-select: none; cursor: default;
+      color: var(--dsw-alias-label-secondary, #cfd3d6); border: 1px solid var(--dsw-alias-border-l2, rgba(255,255,255,.12));
+      --arc: var(--dsw-alias-brand-text, #679efe);
+    }
+    .meter.warn { --arc: #e5a13a; color: #e5a13a; border-color: color-mix(in srgb, #e5a13a 50%, transparent); }
+    .meter.full { --arc: var(--dsw-alias-state-error-primary, #f25a5a); color: var(--dsw-alias-state-error-primary, #f25a5a); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 55%, transparent); }
+    svg { width: 16px; height: 16px; flex: none; fill: none; stroke-width: 2.4; transform: rotate(-90deg); }
+    .track { stroke: currentColor; opacity: .25; }
+    .arc { stroke: var(--arc); stroke-linecap: round; transition: stroke-dasharray .4s ease; }
+    @media (prefers-reduced-motion: reduce) { .arc { transition: none; } }
+  `;
+  const METER_WARN_RATIO = 0.8;
+  const METER_FULL_RATIO = 0.95;
+
   // The top right corner: the connection pill, and to its left a link to the new release when
   // there is one. Both share one fixed row, so they never overlap whatever their width.
   const PILL_STYLES = `
@@ -319,6 +339,15 @@
     // DeepSeek spaces its toggles with their own margins, so the first button brings its own.
     folder.host.style.marginRight = '8px';
 
+    const meter = attach(
+      'dsx-context',
+      METER_STYLES,
+      '<div class="meter" tabindex="0"><svg viewBox="0 0 16 16" aria-hidden="true"><circle class="track" cx="8" cy="8" r="6"/><circle class="arc" cx="8" cy="8" r="6" pathLength="100" stroke-dasharray="0 100"/></svg><span></span></div>',
+    );
+    const meterBox = meter.shadow.querySelector('.meter');
+    const meterArc = meter.shadow.querySelector('.arc');
+    const meterLabel = meter.shadow.querySelector('span');
+
     const pillBox = pill.shadow.querySelector('.status');
     const folderButton = folder.shadow.querySelector('button');
     const permissionButton = permission.shadow.querySelector('button');
@@ -326,7 +355,8 @@
     const wave = createWave();
     let mode = 'ask';
     // What each tooltip says right now. The tooltips read it when they show, and update() fills it in.
-    const tips = { pill: '', folder: '', permission: '', update: 'Open the release page. Run the new setup and the extension updates itself.' };
+    const tips = { pill: '', folder: '', permission: '', context: '', update: 'Open the release page. Run the new setup and the extension updates itself.' };
+    tooltip.bind(meterBox, () => tips.context);
     tooltip.bind(pillBox, () => tips.pill);
     tooltip.bind(updateLink, () => tips.update);
     tooltip.bind(folderButton, () => tips.folder);
@@ -374,6 +404,23 @@
       tooltip.refresh();
     }
 
+    // `used` and `limit` are tokens, as DeepSeek counts them. A limit of null shows the count alone.
+    function setContext({ used, limit }) {
+      const { formatTokens } = root.DsxContextUsage;
+      const count = Math.max(0, Number(used) || 0);
+      const known = Number.isFinite(limit) && limit > 0;
+      const ratio = known ? Math.min(count / limit, 1) : 0;
+      const grouped = (value) => Math.round(value).toLocaleString('en-US');
+      meterLabel.textContent = known ? `${formatTokens(count)} / ${formatTokens(limit)}` : formatTokens(count);
+      meterArc.setAttribute('stroke-dasharray', `${(ratio * 100).toFixed(1)} 100`);
+      meterBox.className = ['meter', ratio >= METER_FULL_RATIO ? 'full' : ratio >= METER_WARN_RATIO ? 'warn' : ''].join(' ').trim();
+      meterBox.setAttribute('aria-label', known ? `Context used: ${grouped(count)} of ${grouped(limit)} tokens` : `Context used: ${grouped(count)} tokens`);
+      tips.context = known
+        ? `Context used: ${grouped(count)} of ${grouped(limit)} tokens (${(ratio * 100).toFixed(ratio < 0.1 ? 1 : 0)}%)\nCounted by DeepSeek`
+        : `Context used: ${grouped(count)} tokens\nCounted by DeepSeek`;
+      tooltip.refresh();
+    }
+
     // React owns the group's children, so this only adds to it and never moves anything of React's.
     function mount() {
       if (document.body && !pill.host.isConnected) document.body.append(pill.host);
@@ -382,6 +429,9 @@
       if (!group) return;
       if (folder.host.parentElement !== group) group.prepend(folder.host);
       if (permission.host.parentElement !== group) group.append(permission.host);
+      // The attach and send buttons sit in the next group of the same row. The meter goes before them.
+      const actions = group.nextElementSibling;
+      if (actions && meter.host.parentElement !== actions) actions.prepend(meter.host);
     }
 
     // The same wave as a click on the button, for a mode changed some other way.
@@ -389,7 +439,9 @@
       wave.play(permission.host, next === 'bypass' ? 'danger' : 'light');
     }
 
-    return { update, mount, playModeWave };
+    setContext({ used: 0, limit: null });
+
+    return { update, mount, playModeWave, setContext };
   }
 
   root.DsxPageControls = { createPageControls, findComposerBox };

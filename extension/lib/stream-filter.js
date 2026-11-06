@@ -3,7 +3,9 @@
 (function (root) {
   'use strict';
 
-  const Protocol = typeof module !== 'undefined' && module.exports ? require('./protocol.js') : root.DsxProtocol;
+  const isNode = typeof module !== 'undefined' && module.exports;
+  const Protocol = isNode ? require('./protocol.js') : root.DsxProtocol;
+  const ContextUsage = isNode ? require('./context-usage.js') : root.DsxContextUsage;
 
   const OPEN_TAG = new RegExp(`<dsx:(${Protocol.TOOL_NAMES.join('|')})\\b`);
 
@@ -205,6 +207,13 @@
       });
     }
 
+    // DeepSeek ends a reply with the token total of the whole chat so far.
+    function reportUsage(patch) {
+      if (!Array.isArray(patch.v)) return;
+      const entry = patch.v.find((item) => item && item.p === 'accumulated_token_usage');
+      if (entry && Number.isFinite(entry.v) && entry.v > 0) onEvent({ type: 'usage', sessionId, tokens: entry.v });
+    }
+
     function rewritePatch(line, patch) {
       if (patch.p !== undefined) path = patch.p;
 
@@ -220,6 +229,7 @@
       }
 
       if (path === 'response/status' || (path === 'response' && patch.o === 'BATCH')) {
+        reportUsage(patch);
         return `${flushFragment()}${line}\n`;
       }
 
@@ -307,9 +317,10 @@
     const messages = data && data.chat_messages;
     const tools = [];
     const results = [];
-    if (!Array.isArray(messages)) return { tools, results };
+    if (!Array.isArray(messages)) return { tools, results, tokens: null, sessionId: fallbackSessionId };
 
     const sessionId = (data.chat_session && data.chat_session.id) || fallbackSessionId;
+    const tokens = ContextUsage.latestUsage(messages, data.chat_session && data.chat_session.current_message_id);
 
     const rewriteUserText = (text) => {
       const stripped = Protocol.stripInjected(text);
@@ -355,7 +366,7 @@
         rewriteAssistant(message);
       }
     }
-    return { tools, results };
+    return { tools, results, tokens, sessionId };
   }
 
   const api = { createToolScanner, createSseRewriter, rewriteHistory };

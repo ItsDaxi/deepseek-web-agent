@@ -11,13 +11,13 @@
   "content_scripts": [
     {
       "matches": ["https://chat.deepseek.com/*"],
-      "js": ["lib/protocol.js", "lib/stream-filter.js", "page-hook.js"],
+      "js": ["lib/protocol.js", "lib/context-usage.js", "lib/stream-filter.js", "page-hook.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
       "matches": ["https://chat.deepseek.com/*"],
-      "js": ["lib/slash-match.js", "cards.js", "page-controls.js", "think-collapse.js", "slash-commands.js", "content.js"],
+      "js": ["lib/slash-match.js", "lib/context-usage.js", "cards.js", "page-controls.js", "think-collapse.js", "slash-commands.js", "content.js"],
       "css": ["page.css"],
       "run_at": "document_start"
     }

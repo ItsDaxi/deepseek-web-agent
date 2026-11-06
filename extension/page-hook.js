@@ -5,6 +5,7 @@
 
   const Protocol = window.DsxProtocol;
   const Filter = window.DsxStreamFilter;
+  const ContextUsage = window.DsxContextUsage;
 
   const STREAM_PATHS = [
     '/api/v0/chat/completion',
@@ -14,6 +15,7 @@
     '/api/v0/chat/resume_stream',
   ];
   const HISTORY_PATH = '/api/v0/chat/history_messages';
+  const SETTINGS_PATH = '/api/v0/client/settings';
   const TITLE_PATH = '/api/v0/chat_session/update_title';
   const RESULT_MARKER = new RegExp(`^${Protocol.RESULT_MARKER_PREFIX}(\\S+)$`);
   const LEAKED_TITLE = /\b(dsx|shell tool|tool syntax|system prompt)\b/i;
@@ -109,6 +111,9 @@
         requests.set(this, { kind: 'history', sessionId: parsed.searchParams.get('chat_session_id') });
       } else if (STREAM_PATHS.includes(parsed.pathname)) {
         requests.set(this, { kind: 'stream', path: parsed.pathname, headers: {}, seen: 0, output: '' });
+      } else if (parsed.pathname === SETTINGS_PATH && parsed.searchParams.get('scope') === 'model') {
+        // Only read, to learn how many tokens a chat can hold. The page gets the answer untouched.
+        requests.set(this, { kind: 'settings' });
       }
     }
     return nativeOpen.call(this, method, target, ...rest);
@@ -127,8 +132,19 @@
       beginStream(this, request);
       return nativeSend.call(this, outgoing);
     }
+    if (request && request.kind === 'settings') this.addEventListener('load', () => reportContextLimit(this));
     return nativeSend.call(this, body);
   };
+
+  function reportContextLimit(xhr) {
+    try {
+      const payload = xhr.responseType === 'json' ? nativeResponse.call(xhr) : JSON.parse(nativeResponseText.call(xhr));
+      const tokens = ContextUsage.contextLimit(payload);
+      if (tokens) post({ type: 'context-limit', tokens });
+    } catch {
+      // Not the answer expected. The page keeps working and the meter just shows no limit.
+    }
+  }
 
   // ---- Stream responses ----------------------------------------------------------------------
 
@@ -185,8 +201,8 @@
     if (xhr.readyState !== 4) return raw;
     try {
       const payload = JSON.parse(raw);
-      const { tools, results } = Filter.rewriteHistory(payload, request.sessionId);
-      post({ type: 'history', tools, results });
+      const { tools, results, tokens, sessionId } = Filter.rewriteHistory(payload, request.sessionId);
+      post({ type: 'history', tools, results, tokens, sessionId });
       request.text = JSON.stringify(payload);
     } catch {
       request.text = raw;
@@ -221,8 +237,8 @@
       } else if (this.responseType === 'json' && requests.get(this)?.kind === 'history' && this.readyState === 4) {
         const native = nativeResponse.call(this);
         if (native) {
-          const { tools, results } = Filter.rewriteHistory(native, requests.get(this).sessionId);
-          if (tools.length || results.length) post({ type: 'history', tools, results });
+          const { tools, results, tokens, sessionId } = Filter.rewriteHistory(native, requests.get(this).sessionId);
+          if (tools.length || results.length || tokens) post({ type: 'history', tools, results, tokens, sessionId });
         }
         return native;
       }
