@@ -5,7 +5,8 @@
 #
 # -DryRun    does everything except commit, push and publish, then puts the version files back.
 # -WithE2E   also runs the end-to-end test, which needs Python with Playwright.
-# -NotesFile uses your own release notes instead of the list of commit subjects.
+# -ChangesFile is a text file with the list of changes for the notes, instead of the commit subjects.
+#            The standard text and the SHA-256 of the setup are added around it.
 # -CommitTrailer adds a line to the end of the release commit message.
 #
 # It needs Node.js, git, and the GitHub CLI (gh) logged in to the account that owns the repository.
@@ -13,7 +14,7 @@ param(
   [Parameter(Mandatory = $true)][string]$Version,
   [switch]$DryRun,
   [switch]$WithE2E,
-  [string]$NotesFile = '',
+  [string]$ChangesFile = '',
   [string]$CommitTrailer = ''
 )
 
@@ -101,24 +102,24 @@ try {
   Write-Output "SHA-256: $hash"
 
   # ---- Release notes ----------------------------------------------------------------------------
-  if ($NotesFile) {
-    $notes = [IO.File]::ReadAllText((Resolve-Path $NotesFile))
+  if ($ChangesFile) {
+    $list = ([IO.File]::ReadAllText((Resolve-Path $ChangesFile))).Trim()
   } else {
     $previous = Get-Output { git describe --tags --abbrev=0 }
     $range = if ($previous) { "$previous..HEAD" } else { 'HEAD' }
     $subjects = @(git log --pretty=format:'%s' $range | Where-Object { $_ -notmatch '^Release v' })
     $list = if ($subjects.Count) { ($subjects | ForEach-Object { "- $_" }) -join "`n" } else { '- Small fixes.' }
-    $tick = [char]96
-    $notes = @(
-      '## What changed', '', $list, '',
-      "Windows setup for the extension and its native host. It needs no admin rights and no Node.js (a copy of Node.js $nodeVersion is bundled), and installs into your user folder. Run it over an older install to update it, then reload the extension in your browser.",
-      '',
-      'The setup is not signed, so SmartScreen may warn you. Choose More info, then Run anyway, if you trust where you got it. You can check the download against this SHA-256:',
-      '', "$tick$hash$tick", '',
-      "This is unofficial and not affiliated with DeepSeek. It depends on the site's private web API, so a DeepSeek update can break it. Read the Security section of the README before you use Bypass mode.",
-      '', 'On macOS and Linux, install from source as described in the README.'
-    ) -join "`n"
   }
+  $tick = [char]96
+  $notes = @(
+    '## What changed', '', $list, '',
+    "Windows setup for the extension and its native host. It needs no admin rights and no Node.js (a copy of Node.js $nodeVersion is bundled), and installs into your user folder. Run it over an older install to update it, then reload the extension in your browser.",
+    '',
+    'The setup is not signed, so SmartScreen may warn you. Choose More info, then Run anyway, if you trust where you got it. You can check the download against this SHA-256:',
+    '', "$tick$hash$tick", '',
+    "This is unofficial and not affiliated with DeepSeek. It depends on the site's private web API, so a DeepSeek update can break it. Read the Security section of the README before you use Bypass mode.",
+    '', 'On macOS and Linux, install from source as described in the README.'
+  ) -join "`n"
   $notesPath = Join-Path $env:TEMP "dsx-release-notes-$Version.md"
   [IO.File]::WriteAllText($notesPath, $notes, (New-Object Text.UTF8Encoding($false)))
 
