@@ -72,7 +72,7 @@ function connectHost() {
     }
     const owner = jobOwners.get(message.id);
     if (owner) owner.postMessage(message);
-    if (message.type === 'exit' || message.type === 'folder-picked') jobOwners.delete(message.id);
+    if (message.type === 'exit' || message.type === 'folder-picked' || message.type === 'prompt-file') jobOwners.delete(message.id);
   });
 
   nativePort.onDisconnect.addListener(() => {
@@ -267,6 +267,15 @@ function handleTabMessage(port, message) {
       }
       jobOwners.set(message.id, port);
       nativePort.postMessage(message);
+      break;
+    case 'read-prompt':
+      connectHost();
+      if (!nativePort) {
+        port.postMessage({ type: 'prompt-file', id: message.id, text: null, error: hostError || 'The shell host is not connected.' });
+        return;
+      }
+      jobOwners.set(message.id, port);
+      nativePort.postMessage({ type: 'read-prompt', id: message.id });
       break;
     case 'kill':
       if (nativePort) nativePort.postMessage(message);

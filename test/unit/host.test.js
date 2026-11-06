@@ -9,8 +9,8 @@ const path = require('node:path');
 const HOST = path.join(__dirname, '..', '..', 'host', 'host.js');
 const IS_WINDOWS = process.platform === 'win32';
 
-function startHost() {
-  const child = spawn(process.execPath, [HOST], { stdio: ['pipe', 'pipe', 'inherit'] });
+function startHost(env = {}) {
+  const child = spawn(process.execPath, [HOST], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, ...env } });
   const messages = [];
   const waiters = [];
   let buffer = Buffer.alloc(0);
@@ -70,6 +70,38 @@ test('hello reports the environment', async () => {
   const { version } = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'extension', 'manifest.json'), 'utf8'));
   assert.equal(hello.extensionVersion, version);
   host.stop();
+});
+
+test('the prompt file is read with its text, and its problems are named', async () => {
+  const fs = require('node:fs');
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'dsx-prompt-'));
+  const file = path.join(folder, 'evil.txt');
+  const host = startHost({ DSX_PROMPT_FILE: file });
+  const ask = async (id) => {
+    host.send({ type: 'read-prompt', id });
+    return host.waitFor((m) => m.type === 'prompt-file' && m.id === id);
+  };
+  try {
+    assert.equal((await ask('missing')).error, 'missing');
+
+    fs.writeFileSync(file, '﻿  \r\n');
+    assert.equal((await ask('empty')).error, 'empty');
+
+    fs.writeFileSync(file, '﻿Be brief.\r\nAnswer in Italian.\r\n');
+    const read = await ask('read');
+    assert.equal(read.error, null);
+    assert.equal(read.text, 'Be brief.\nAnswer in Italian.');
+    assert.equal(read.truncated, false);
+    assert.equal(read.path, file);
+
+    fs.writeFileSync(file, 'x'.repeat(25_000));
+    const long = await ask('long');
+    assert.equal(long.text.length, 20_000);
+    assert.equal(long.truncated, true);
+  } finally {
+    host.stop();
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 test('a successful command streams output and exits 0', async () => {

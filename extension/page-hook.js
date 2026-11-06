@@ -26,6 +26,8 @@
   const config = { env: null };
   const requests = new WeakMap();
   const pendingResults = new Map();
+  // The instructions already sent in each chat, by session id.
+  const extraSent = new Map();
   const resultQueue = [];
   let activeStreams = 0;
   let pumping = false;
@@ -83,7 +85,15 @@
     } else {
       const full = isFirstMessage(request.path, body);
       if (full) request.firstUserText = body.prompt;
-      body.prompt = Protocol.injectPrompt(body.prompt, config.env, { full });
+      // The user's own instructions go out once per chat, and again only when their text changes.
+      // A chat that was sent some and now has none is told to forget them.
+      const wanted = (config.env && config.env.extra) || '';
+      const sent = extraSent.get(request.sessionId) || '';
+      const extra = wanted && wanted !== sent ? wanted : null;
+      const retire = !wanted && Boolean(sent);
+      body.prompt = Protocol.injectPrompt(body.prompt, config.env, { full, extra, retire });
+      if (extra) extraSent.set(request.sessionId, extra);
+      if (retire) extraSent.delete(request.sessionId);
       post({ type: 'user-turn' });
     }
     return JSON.stringify(body);

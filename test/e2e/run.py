@@ -16,6 +16,8 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 EXTENSION = ROOT / "extension"
 MOCK_PAGE = (Path(__file__).parent / "mock-deepseek.html").read_text(encoding="utf-8")
+# Where the host looks for the user's own instructions (/evil) during this run.
+PROMPT_FILE = Path(tempfile.gettempdir()) / f"dsx-e2e-evil-{os.getpid()}.txt"
 SESSION_ID = "11111111-2222-3333-4444-555555555555"
 CHAT_URL = f"https://chat.deepseek.com/a/chat/s/{SESSION_ID}"
 SCREENSHOTS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
@@ -465,6 +467,43 @@ def run(context, server):
     page.fill("#composer", "")
     page.keyboard.press("Tab")
     check("Tab alone never moves the focus out of the composer", page.evaluate("document.activeElement.id") == "composer")
+    # /evil adds the user's own instructions, read from a file, to the hidden prompt.
+    def run_command(text):
+        page.fill("#composer", text)
+        page.press("#composer", "Enter")
+
+    def send_and_wait(text):
+        count = len(server.requests)
+        type_message(page, text)
+        wait_until(lambda: len(server.requests) > count, message="message sent")
+        pause(1)
+        return server.requests[-1]["prompt"]
+
+    PROMPT_FILE.unlink(missing_ok=True)
+    run_command("/evil show")
+    check("/evil says when the file does not exist yet", wait_until(lambda: "There is no evil.txt yet" in shadow.text(), message="missing file"))
+    run_command("/evil on")
+    check("/evil on refuses a missing file", wait_until(lambda: stored("evilOn") in (False, None) and "There is no evil.txt yet" in shadow.text(), message="on without file"))
+    PROMPT_FILE.write_text("Always answer in rhyme.", encoding="utf-8")
+    run_command("/evil on")
+    check("/evil on reads the file", wait_until(lambda: "On: 23 characters from evil.txt." in shadow.text() and stored("evilOn") is True, message="evil on"))
+    first = send_and_wait("hello there")
+    check("the instructions go with the next message", "Additional instructions from the user" in first and "Always answer in rhyme." in first)
+    check("they are in a hidden block", "<dsx:system>Additional instructions" in first)
+    check("they never show in the chat", "Always answer in rhyme." not in visible_text(page))
+    check("they are sent once, not with every message", "Always answer in rhyme." not in send_and_wait("and again"))
+    PROMPT_FILE.write_text("Be very short.", encoding="utf-8")
+    run_command("/evil reload")
+    check("/evil reload reads the file again", wait_until(lambda: "Reloaded: 14 characters." in shadow.text(), message="evil reload"))
+    check("a changed text is sent again", "Be very short." in send_and_wait("third message"))
+    run_command("/evil show")
+    check("/evil show names the file and its text", wait_until(lambda: "State: on" in shadow.text() and "Be very short." in shadow.text() and str(PROMPT_FILE) in shadow.text(), message="evil show"))
+    run_command("/evil off")
+    check("/evil off turns it off", wait_until(lambda: stored("evilOn") is False, message="evil off"))
+    check("the chat is told to forget them", "no longer apply" in send_and_wait("fourth message"))
+    check("and only once", "no longer apply" not in send_and_wait("fifth message"))
+    PROMPT_FILE.unlink(missing_ok=True)
+
     # A page script could fake the keys to change the permission mode, so faked ones must do nothing.
     page.fill("#composer", "/mode bypass")
     wait_until(lambda: "Run commands without asking" in shadow.text(), message="mode menu")
@@ -578,6 +617,8 @@ def main():
                 profile,
                 viewport={"width": 1100, "height": 900},
                 args=[f"--disable-extensions-except={EXTENSION}", f"--load-extension={EXTENSION}", "--no-first-run"],
+                # The host inherits this, so /evil reads a file of the test and never a real one.
+                env={**os.environ, "DSX_PROMPT_FILE": str(PROMPT_FILE)},
                 **target,
             )
             try:

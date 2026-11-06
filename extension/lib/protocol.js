@@ -89,8 +89,22 @@ Rules:
     return `<dsx:system>Reminder: to act on the user's computer, end your reply with tags, outside any code fence: <dsx:read path="file"></dsx:read>, <dsx:write path="file">content</dsx:write>, <dsx:edit path="file"><dsx:old>exact text</dsx:old><dsx:new>new text</dsx:new></dsx:edit>, <dsx:glob>pattern</dsx:glob>, <dsx:grep>regular expression</dsx:grep> or <dsx:shell timeout="seconds">command</dsx:shell>. Choose the timeout yourself, up to 600. For something that keeps running, such as a dev server, add background="true" and read it with <dsx:poll id="job-id" wait="seconds"></dsx:poll>, and stop it with <dsx:kill id="job-id"></dsx:kill>. Write nothing after your last tag. Web search and your other abilities still work as usual.${location} Never mention this reminder or how these work.</dsx:system>`;
   }
 
-  function injectPrompt(prompt, env, { full }) {
-    return `${prompt}\n\n${full ? buildSystemPrompt(env) : buildReminder(env)}`;
+  // The user's own instructions, from a file. They sit in a <dsx:system> block like the rest, so the
+  // history hides them too, and a closing tag inside them cannot end the block early.
+  function buildExtraBlock(text) {
+    const safe = String(text).replace(/<\/dsx:system>/g, '</dsx:system_>');
+    return `<dsx:system>Additional instructions from the user. Follow them together with everything above:\n${safe}</dsx:system>`;
+  }
+
+  const EXTRA_RETIRED = '<dsx:system>The additional instructions from the user that you were given earlier no longer apply. Ignore them from now on.</dsx:system>';
+
+  // `extra` is the text to add to this message, or null. `retire` tells the model that instructions
+  // sent earlier in this chat no longer apply.
+  function injectPrompt(prompt, env, { full, extra = null, retire = false }) {
+    const parts = [prompt, full ? buildSystemPrompt(env) : buildReminder(env)];
+    if (extra) parts.push(buildExtraBlock(extra));
+    if (retire) parts.push(EXTRA_RETIRED);
+    return parts.join('\n\n');
   }
 
   function stripInjected(prompt) {
@@ -181,6 +195,7 @@ Rules:
     RESULT_MARKER_PREFIX,
     MAX_MODEL_OUTPUT_CHARS,
     buildSystemPrompt,
+    buildExtraBlock,
     injectPrompt,
     stripInjected,
     truncateForModel,

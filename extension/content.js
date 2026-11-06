@@ -9,7 +9,8 @@
   const { createSlashCommands } = globalThis.DsxSlashCommands;
 
   // dismissedUpdate is the release tag whose notice the user closed.
-  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '' };
+  // evilOn: the user's own instructions, read from evil.txt, are added to the hidden prompt.
+  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', evilOn: false };
   // Used only when the model leaves out the timeout it is asked to choose.
   const FALLBACK_TIMEOUT_SECONDS = 120;
   const READ_ONLY_TOOLS = new Set(['read', 'glob', 'grep']);
@@ -55,8 +56,37 @@
   }
 
   function pushConfig() {
-    const env = hostInfo ? { ...hostInfo, cwd: settings.cwd } : null;
+    const env = hostInfo ? { ...hostInfo, cwd: settings.cwd, extra: settings.evilOn && extraPrompt ? extraPrompt.text : '' } : null;
     postToPage({ type: 'config', env });
+  }
+
+  // The user's own instructions, read from evil.txt by the host. Null until they are read.
+  let extraPrompt = null;
+  let pendingPromptFile = null;
+  const PROMPT_ANSWER_MS = 5000;
+
+  // Asks the host for the file. Resolves with its answer, or with an error if it never comes.
+  function readPromptFile() {
+    return new Promise((resolve) => {
+      if (!port) {
+        resolve({ text: null, error: 'The shell host is not connected.' });
+        return;
+      }
+      const id = `prompt-${Date.now()}`;
+      const timer = setTimeout(() => {
+        pendingPromptFile = null;
+        resolve({ text: null, error: 'The shell host did not answer.' });
+      }, PROMPT_ANSWER_MS);
+      pendingPromptFile = { id, done: (answer) => { clearTimeout(timer); resolve(answer); } };
+      port.postMessage({ type: 'read-prompt', id });
+    });
+  }
+
+  async function loadExtraPrompt() {
+    const answer = await readPromptFile();
+    extraPrompt = answer.text ? answer : null;
+    pushConfig();
+    return answer;
   }
 
   chrome.storage.local.get(DEFAULT_SETTINGS).then((stored) => {
@@ -135,12 +165,20 @@
           pendingUpdateAnswer = null;
         }
         break;
+      case 'prompt-file':
+        if (pendingPromptFile && message.id === pendingPromptFile.id) {
+          pendingPromptFile.done(message);
+          pendingPromptFile = null;
+        }
+        break;
       case 'host-status':
         hostInfo = message.connected ? message.info : null;
         hostError = message.connected ? null : message.error;
         pushConfig();
         renderControls();
         if (hostInfo) runApprovedCommands();
+        // The file is read again each time the host connects, so an edit takes effect on a reload.
+        if (hostInfo && settings.evilOn && !extraPrompt) loadExtraPrompt();
         break;
       case 'started':
         store.set(message.id, { shell: message.shell, cwd: message.cwd });
@@ -634,6 +672,16 @@
     return { lines };
   }
 
+  // What to tell the user when evil.txt cannot be used.
+  function describePromptProblem(answer) {
+    if (answer.error === 'missing') return ['There is no evil.txt yet. Create it here and put your instructions in it:', answer.path];
+    if (answer.error === 'empty') return ['evil.txt is empty. Put your instructions in it:', answer.path];
+    return [answer.error || 'evil.txt could not be read.'];
+  }
+
+  const PREVIEW_LINES = 6;
+  const PREVIEW_LINE_CHARS = 110;
+
   const SLASH_COMMANDS = [
     {
       name: 'help',
@@ -694,8 +742,47 @@
           `Mode: ${settings.mode === 'bypass' ? 'bypass' : 'manual'}`,
           `Folder: ${settings.cwd || (hostInfo && hostInfo.home) || 'not set'}`,
           `Thinking blocks: ${settings.collapseThinking === false ? 'left as DeepSeek shows them' : 'kept collapsed'}`,
+          `Your instructions (evil.txt): ${settings.evilOn ? (extraPrompt ? `on, ${extraPrompt.text.length} characters` : 'on, not read yet') : 'off'}`,
         ],
       }),
+    },
+    {
+      name: 'evil',
+      description: 'Add your own instructions from evil.txt to the hidden prompt',
+      // Showing comes first, so a careless Enter right after "/evil " only reads.
+      args: [
+        { value: 'show', description: 'Show the file, and whether it is on' },
+        { value: 'on', description: 'Add it to your next message in each chat' },
+        { value: 'off', description: 'Stop adding it' },
+        { value: 'reload', description: 'Read the file again after editing it' },
+      ],
+      run: async (arg) => {
+        if (arg === 'off') {
+          saveSettings({ evilOn: false });
+          extraPrompt = null;
+          pushConfig();
+          return { lines: ['Your instructions are off. A chat that already has them is told to ignore them.'] };
+        }
+        if (arg === 'show') {
+          const answer = await readPromptFile();
+          const state = `State: ${settings.evilOn ? 'on' : 'off'}`;
+          if (!answer.text) return { error: true, lines: [state, ...describePromptProblem(answer)] };
+          const preview = answer.text.split('\n').filter((line) => line.trim()).slice(0, PREVIEW_LINES)
+            .map((line) => (line.length > PREVIEW_LINE_CHARS ? `${line.slice(0, PREVIEW_LINE_CHARS)}…` : line));
+          return { lines: [state, `File: ${answer.path}`, `Size: ${answer.text.length} characters${answer.truncated ? ' (cut to the first 20000)' : ''}`, '', ...preview] };
+        }
+        if (arg === 'on' || arg === 'reload') {
+          const answer = await loadExtraPrompt();
+          if (!answer.text) return { error: true, lines: describePromptProblem(answer) };
+          const size = `${answer.text.length} characters${answer.truncated ? ' (cut to the first 20000)' : ''}`;
+          if (arg === 'reload') {
+            return { lines: [settings.evilOn ? `Reloaded: ${size}.` : `The file reads fine (${size}), but it is off. Use /evil on.`] };
+          }
+          saveSettings({ evilOn: true });
+          return { lines: [`On: ${size} from evil.txt.`, 'They go with your next message in each chat.'] };
+        }
+        return { error: true, lines: ['Use /evil show, on, off or reload.'] };
+      },
     },
     {
       name: 'update',

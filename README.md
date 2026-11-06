@@ -68,10 +68,17 @@ A message that only starts with a slash, such as `/etc/hosts what is this file`,
 | `/cd` | Opens the folder dialog to choose the working directory. |
 | `/status` | Shows the extension version, the shell host, the mode, the folder and the thinking setting. |
 | `/thinking collapse` or `/thinking default` | Keeps the thinking blocks collapsed, or leaves them as DeepSeek shows them. |
+| `/evil show`, `on`, `off` or `reload` | Adds your own instructions for the model, read from `evil.txt`, to the hidden prompt. See below. |
 | `/update` | Asks GitHub for the latest release now, and shows the update pill again if it was closed. It works even when the automatic check is off, because you are asking for it. |
 | `/help` | Lists the commands. |
 
 A command answers in a small panel above the composer, which closes by itself or when you click it.
+
+#### Your own instructions
+
+`/evil` adds a text of your own to the hidden prompt, next to the one the extension already sends. Write the text in a file called `evil.txt`, in the install folder beside `host` and `extension`. With the Windows setup that is `%LOCALAPPDATA%\DeepSeekShellTool\`, and a setup update leaves the file alone. When you install from source it is the root of the project, where git ignores it. `/evil show` prints the exact path and tells you if the file is missing.
+
+`/evil on` reads the file and turns the feature on. The text goes out with your next message in each chat, once, and again only if it changes. It sits in a hidden block, so it never shows in the chat. `/evil reload` reads the file again after you edit it, and `/evil off` stops it and tells a chat that already has the text to ignore it. The file is cut at 20,000 characters. Only that one file is read, and the text is never taken from the web.
 
 ### Update notice
 

@@ -59,6 +59,31 @@ function extensionVersion() {
   }
 }
 
+// The user's own instructions for the model, kept in a text file at the top of the install folder
+// (beside host/ and extension/), where an update does not touch it. Only this one fixed file is read.
+// DSX_PROMPT_FILE moves it, which is how the tests avoid touching a real one.
+const PROMPT_FILE = process.env.DSX_PROMPT_FILE || path.join(__dirname, '..', 'evil.txt');
+const MAX_PROMPT_CHARS = 20_000;
+
+function readPromptFile({ id }) {
+  const reply = { type: 'prompt-file', id, path: PROMPT_FILE, text: null, truncated: false, error: null };
+  try {
+    let text = fs.readFileSync(PROMPT_FILE, 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n').trim();
+    if (!text) {
+      reply.error = 'empty';
+    } else {
+      if (text.length > MAX_PROMPT_CHARS) {
+        text = text.slice(0, MAX_PROMPT_CHARS);
+        reply.truncated = true;
+      }
+      reply.text = text;
+    }
+  } catch (error) {
+    reply.error = error.code === 'ENOENT' ? 'missing' : error.message;
+  }
+  send(reply);
+}
+
 function defaultShell() {
   if (IS_WINDOWS) return 'powershell';
   const fromEnv = (process.env.SHELL || '').split('/').pop();
@@ -424,6 +449,9 @@ function stopJob(job) {
 
 function handle(message) {
   switch (message.type) {
+    case 'read-prompt':
+      readPromptFile(message);
+      break;
     case 'pick-folder':
       try {
         pickFolder(message);
