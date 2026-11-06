@@ -1,4 +1,4 @@
-// Windows setup for DeepSeek Shell Tool: a single exe that needs no admin rights and no Node.js.
+// Windows setup for DeepSeek Web Agent: a single exe that needs no admin rights and no Node.js.
 // Written for the C# 5 compiler that ships with every Windows, so it builds with no extra tools.
 using System;
 using System.Collections.Generic;
@@ -63,9 +63,11 @@ namespace DsxSetup
 
     static class Installer
     {
-        public const string AppName = "DeepSeek Shell Tool";
+        public const string AppName = "DeepSeek Web Agent";
         const string HostName = "com.dsx.shell_host";
         const string ExtensionId = "hacpjcoldiccblakbdgcnccmlehckaek";
+        // This key and the folder name below keep the old product name, so a setup run over an older
+        // install updates it in place and one uninstall entry never turns into two.
         const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\DeepSeekShellTool";
 
         // Brave has no registry path of its own on Windows: it reads the Chromium and Chrome ones.
@@ -818,7 +820,7 @@ namespace DsxSetup
             removeFolderOnClose = true;
             StartPage();
             AddHeader("Removed", Installer.AppName + " is gone from your computer", true);
-            AddText(host, "To finish, open your browser's extensions page and remove DeepSeek Shell Tool. It can't remove itself.", PageMargin, 112, ContentWidth, 44, 15, Theme.TextSecondary);
+            AddText(host, "To finish, open your browser's extensions page and remove " + Installer.AppName + ". It can't remove itself.", PageMargin, 112, ContentWidth, 44, 15, Theme.TextSecondary);
             FlatButton close = AddButton(host, "Close", 620 - PageMargin - 150, 396, 150, FlatButton.Kinds.Primary, Close);
             ActiveControl = close;
         }

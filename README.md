@@ -14,13 +14,13 @@ Developed and tested on Windows with Brave and Chromium. It should work in Chrom
 
 ## Install on Windows
 
-Run `DeepSeekShellToolSetup.exe`. It needs no admin rights and no Node.js, and installs into your user folder. You can remove it from Installed apps in Windows Settings.
+Download `DeepSeekWebAgentSetup.exe` from the [latest release](https://github.com/ItsDaxi/deepseek-web-agent/releases/latest) and run it. It needs no admin rights and no Node.js, and installs into your user folder. You can remove it from Installed apps in Windows Settings.
 
 Browsers only let you add an unpacked extension yourself, so the setup opens the right page, copies the folder path for you, and carries on once it sees the extension.
 
 The setup is not signed, so SmartScreen may warn you. Choose More info, then Run anyway, if you trust where you got it.
 
-The installer is not in the repository. To build it, you need Windows and a local Node.js, and the result lands in `dist`:
+The installer is attached to each release and is not in the repository. To build it yourself, you need Windows and a local Node.js, and the result lands in `dist`:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File installer/build.ps1

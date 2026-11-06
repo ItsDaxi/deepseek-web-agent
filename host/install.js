@@ -67,7 +67,7 @@ function writeHostManifest(launcher, target) {
     JSON.stringify(
       {
         name: HOST_NAME,
-        description: 'DeepSeek Shell Tool native host',
+        description: 'DeepSeek Web Agent native host',
         path: launcher,
         type: 'stdio',
         allowed_origins: [`chrome-extension://${extensionId()}/`],

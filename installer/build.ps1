@@ -1,4 +1,4 @@
-# Builds dist\DeepSeekShellToolSetup.exe with only what ships with Windows, plus the local Node.js runtime it bundles.
+# Builds dist\DeepSeekWebAgentSetup.exe with only what ships with Windows, plus the local Node.js runtime it bundles.
 param([string]$NodeExe = '')
 
 $ErrorActionPreference = 'Stop'
@@ -96,7 +96,7 @@ Get-ChildItem (Join-Path $work 'payload') -Recurse -File | ForEach-Object {
 $archive.Dispose()
 
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-$output = Join-Path $dist 'DeepSeekShellToolSetup.exe'
+$output = Join-Path $dist 'DeepSeekWebAgentSetup.exe'
 if (Test-Path $output) { Remove-Item $output -Force -Confirm:$false }
 $arguments = @(
   '/nologo', '/target:winexe', '/optimize+', '/platform:x64', "/out:$output",
