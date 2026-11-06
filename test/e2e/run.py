@@ -422,6 +422,27 @@ def run(context, server):
     check("the extension has no toolbar popup", "action" not in worker.evaluate("chrome.runtime.getManifest()"))
     check("no page errors from the hook", not errors, str(errors))
 
+    # Update notice: GitHub is faked inside the service worker, so this never touches the network.
+    def fake_release(tag):
+        worker.evaluate("(tag) => { globalThis.fetch = async () => new Response(JSON.stringify({ tag_name: tag }), { status: 200 }); return 0; }", tag)
+        worker.evaluate("chrome.storage.local.remove(['updateCheck', 'dismissedUpdate'])")
+        page.reload()
+
+    fake_release("v0.0.1")
+    shadow = Shadow(page, context)
+    pause(2)
+    check("no notice for an older release", "Update available" not in shadow.text())
+    fake_release("v9.0.0")
+    shadow = Shadow(page, context)
+    check("a newer release shows a notice", wait_until(lambda: "Update available: v9.0.0" in shadow.text(), message="update notice"))
+    shadow.click_last("dismiss-update")
+    check("closing the notice hides it", wait_until(lambda: "Update available" not in shadow.text(), message="notice closed"))
+    check("the closed notice is remembered", stored("dismissedUpdate") == "v9.0.0")
+    page.reload()
+    shadow = Shadow(page, context)
+    pause(2)
+    check("a closed notice stays closed after a reload", "Update available" not in shadow.text())
+
     # Losing the extension must never look like nothing happened.
     type_message(page, "run a slow command")
     wait_until(lambda: len(shadow.actions("run")) == 1, message="run button")

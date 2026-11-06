@@ -1,9 +1,16 @@
 // Bridges DeepSeek tabs and the native host, and routes command output back to the tab that asked.
 'use strict';
 
+importScripts('lib/update-check.js');
+
 const HOST_NAME = 'com.dsx.shell_host';
 const ALLOWED_ORIGIN = 'https://chat.deepseek.com';
 const MAX_DIAGNOSTICS = 30;
+// The release is looked up at most twice a day, or once an hour after a failed try. GitHub
+// allows 60 requests an hour per address without logging in, so this stays far below it.
+const UPDATE_CHECK_EVERY_MS = 12 * 60 * 60 * 1000;
+const UPDATE_RETRY_AFTER_FAILURE_MS = 60 * 60 * 1000;
+const UPDATE_FETCH_TIMEOUT_MS = 8000;
 
 const tabPorts = new Set();
 const jobOwners = new Map();
@@ -75,8 +82,60 @@ function connectHost() {
   nativePort.postMessage({ type: 'hello' });
 }
 
+// ---- Update check ------------------------------------------------------------------------------
+// Asks GitHub for the latest release. No account and no data of the user is sent, and GitHub allows
+// this request from an extension without any extra permission. Turn it off with
+// chrome.storage.local.set({ checkForUpdates: false }).
+
+let updateLookup = null;
+
+async function fetchLatestTag() {
+  const response = await fetch(DsxUpdateCheck.API_URL, {
+    headers: { Accept: 'application/vnd.github+json' },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(UPDATE_FETCH_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
+  const { tag_name: tag } = await response.json();
+  // A tag that is not a plain version is ignored rather than trusted.
+  if (!DsxUpdateCheck.parseVersion(tag)) throw new Error('The latest release has no usable version.');
+  return tag;
+}
+
+async function lookUpLatestTag() {
+  const { updateCheck } = await chrome.storage.local.get({ updateCheck: null });
+  const age = updateCheck ? Date.now() - updateCheck.checkedAt : Infinity;
+  const wait = updateCheck && updateCheck.failed ? UPDATE_RETRY_AFTER_FAILURE_MS : UPDATE_CHECK_EVERY_MS;
+  if (age < wait) return updateCheck.tag;
+
+  let entry;
+  try {
+    entry = { checkedAt: Date.now(), tag: await fetchLatestTag(), failed: false };
+  } catch (error) {
+    logDiagnostic('update-check-failed', error.message);
+    // The last known tag stays, so a short outage does not hide an update already found.
+    entry = { checkedAt: Date.now(), tag: updateCheck ? updateCheck.tag : null, failed: true };
+  }
+  await chrome.storage.local.set({ updateCheck: entry });
+  return entry.tag;
+}
+
+async function checkForUpdate() {
+  const { checkForUpdates } = await chrome.storage.local.get({ checkForUpdates: true });
+  if (checkForUpdates === false) return { available: false };
+  // Several tabs can ask at once, and they share one lookup.
+  updateLookup = updateLookup || lookUpLatestTag().finally(() => { updateLookup = null; });
+  const tag = await updateLookup;
+  return DsxUpdateCheck.status(chrome.runtime.getManifest().version, tag);
+}
+
 function handleTabMessage(port, message) {
   switch (message.type) {
+    case 'check-update':
+      checkForUpdate()
+        .then((status) => port.postMessage({ type: 'update-status', ...status }))
+        .catch(() => {});
+      break;
     case 'connect-host':
       connectHost();
       port.postMessage(hostStatus());

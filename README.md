@@ -54,6 +54,14 @@ All controls sit on the DeepSeek page, in the row with DeepThink and Search. The
 
 The model chooses the timeout of each command, up to 600 seconds.
 
+### Update notice
+
+When you open DeepSeek, the extension asks GitHub for the latest release of this repository. If it is newer than the installed version, a small notice appears under the status pill with a link to the release. Close it and it stays closed until the next release.
+
+This is the only request the extension makes besides the ones to DeepSeek. It goes straight from your browser to `api.github.com`, carries no account and none of your data, and happens at most twice a day. GitHub sees your IP address, as with any visit. To turn it off, run `chrome.storage.local.set({ checkForUpdates: false })` in the extension's service worker console.
+
+For maintainers: the notice compares the `version` in `extension/manifest.json` with the release tag, so raise the version before you tag a release.
+
 ## Permission modes
 
 | Mode | What happens |

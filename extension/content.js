@@ -7,7 +7,8 @@
   const { createPageControls } = globalThis.DsxPageControls;
   const { createThinkCollapser } = globalThis.DsxThinkCollapse;
 
-  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', maxAutoTurns: 25, collapseThinking: true };
+  // dismissedUpdate is the release tag whose notice the user closed.
+  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '' };
   // Used only when the model leaves out the timeout it is asked to choose.
   const FALLBACK_TIMEOUT_SECONDS = 120;
   const READ_ONLY_TOOLS = new Set(['read', 'glob', 'grep']);
@@ -28,6 +29,8 @@
   let settings = { ...DEFAULT_SETTINGS };
   let hostInfo = null;
   let hostError = null;
+  // The newer release the background script found, or null.
+  let updateInfo = null;
   let folderRequest = null;
   let folderError = null;
   let port = null;
@@ -96,6 +99,7 @@
       setTimeout(connect, RECONNECT_MS);
     });
     port.postMessage({ type: 'connect-host' });
+    port.postMessage({ type: 'check-update' });
   }
 
   // A lost connection also loses the command's exit message, so its card must not spin forever.
@@ -114,6 +118,10 @@
 
   function handleBackgroundMessage(message) {
     switch (message.type) {
+      case 'update-status':
+        updateInfo = message.available ? { tag: message.tag, url: message.url } : null;
+        renderControls();
+        break;
       case 'host-status':
         hostInfo = message.connected ? message.info : null;
         hostError = message.connected ? null : message.error;
@@ -566,6 +574,7 @@
   const controls = createPageControls({
     onPickFolder: startFolderPick,
     onChangeMode: (mode) => saveSettings({ mode }),
+    onDismissUpdate: (tag) => saveSettings({ dismissedUpdate: tag }),
   });
 
   function renderControls() {
@@ -576,6 +585,7 @@
       hostError,
       picking: Boolean(folderRequest),
       pickError: folderError,
+      update: updateInfo,
     });
   }
 

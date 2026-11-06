@@ -37,6 +37,17 @@
     i { width: 7px; height: 7px; flex: none; border-radius: 50%; }
   `;
 
+  // Sits under the status pill when a newer release exists.
+  const NOTICE_STYLES = `
+    :host { position: fixed; top: 50px; right: 16px; z-index: 2147483000; }
+    div { display: flex; align-items: center; gap: 10px; padding: 5px 6px 5px 12px; border-radius: 12px; font: 12px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--dsw-alias-label-secondary, #cfd3d6); background: var(--dsw-specific-tip, #353638); border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.06)); }
+    a { color: var(--dsw-alias-brand-text, #679efe); font-weight: 500; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    button { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; font: inherit; font-size: 16px; line-height: 1; }
+    button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5686fe); outline-offset: 1px; }
+  `;
+
   const DOT_COLORS = { ok: 'var(--dsw-alias-state-success-primary, #22c55e)', warn: '#e5a13a' };
 
   function attach(tag, styles, markup) {
@@ -289,8 +300,17 @@
     return null;
   }
 
-  function createPageControls({ onPickFolder, onChangeMode }) {
+  function createPageControls({ onPickFolder, onChangeMode, onDismissUpdate }) {
     const pill = attach('dsx-status', PILL_STYLES, '<div><i></i><span></span></div>');
+    const notice = attach(
+      'dsx-update',
+      NOTICE_STYLES,
+      '<div><span></span><a target="_blank" rel="noopener noreferrer">View on GitHub</a><button type="button" aria-label="Dismiss" data-action="dismiss-update">×</button></div>',
+    );
+    const noticeText = notice.shadow.querySelector('span');
+    const noticeLink = notice.shadow.querySelector('a');
+    const noticeClose = notice.shadow.querySelector('button');
+    let noticeTag = '';
     const folder = attach('dsx-composer-button', BUTTON_STYLES, `<button type="button" data-action="pick-folder">${iconMarkup('folder')}</button>`);
     const permission = attach('dsx-composer-button', BUTTON_STYLES, '<button type="button" data-action="cycle-permission"></button>');
 
@@ -314,6 +334,7 @@
       if (event.isTrusted) handler();
     };
     folderButton.addEventListener('click', trusted(onPickFolder));
+    noticeClose.addEventListener('click', trusted(() => onDismissUpdate(noticeTag)));
     permissionButton.addEventListener('click', trusted(() => {
       const next = mode === 'bypass' ? 'ask' : 'bypass';
       // The host sits in the page's own tree, so the wave can find the composer from it.
@@ -321,8 +342,16 @@
       onChangeMode(next);
     }));
 
-    function update({ alive, settings, hostInfo, hostError, picking, pickError }) {
+    function update({ alive, settings, hostInfo, hostError, picking, pickError, update: newerRelease }) {
       mode = settings.mode;
+
+      // The notice returns for the next release after the user closes this one.
+      noticeTag = newerRelease && newerRelease.tag !== settings.dismissedUpdate ? newerRelease.tag : '';
+      if (noticeTag) {
+        noticeText.textContent = `Update available: ${noticeTag}`;
+        noticeLink.href = newerRelease.url;
+      }
+      syncNotice();
 
       const status = !alive ? 'Reload page' : hostInfo ? 'Connected' : 'Not connected';
       pill.shadow.querySelector('i').style.background = alive && hostInfo ? DOT_COLORS.ok : DOT_COLORS.warn;
@@ -342,8 +371,15 @@
       tooltip.refresh();
     }
 
+    // The notice is only in the page while there is something to say, so it leaves no text behind.
+    function syncNotice() {
+      if (!noticeTag) notice.host.remove();
+      else if (document.body && !notice.host.isConnected) document.body.append(notice.host);
+    }
+
     // React owns the group's children, so this only adds to it and never moves anything of React's.
     function mount() {
+      syncNotice();
       if (document.body && !pill.host.isConnected) document.body.append(pill.host);
       if (document.body && !tooltip.host.isConnected) document.body.append(tooltip.host);
       const group = findComposerToggleGroup();
