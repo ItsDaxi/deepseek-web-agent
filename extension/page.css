@@ -1,0 +1,26 @@
+/* Applied to DeepSeek's own DOM: hides what the tool cards replace. */
+
+/* The sentinel code block keeps its place in the message but only shows the card. */
+.dsx-block {
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: visible !important;
+}
+
+.dsx-block > :not(dsx-card) {
+  display: none !important;
+}
+
+/* Hidden messages that carry command results to the model. */
+.dsx-hidden {
+  display: none !important;
+}
+
+/* The marker sits in the composer for an instant while a result is being sent. */
+textarea[data-dsx-sending] {
+  color: transparent !important;
+  caret-color: transparent !important;
+}

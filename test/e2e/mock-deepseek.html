@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock DeepSeek</title>
+    <style>
+      body {
+        --dsw-alias-brand-primary: #5686fe; --dsw-alias-brand-text: #679efe; --dsw-alias-label-primary: #f9fafb;
+        --dsw-alias-label-secondary: #cfd3d6; --dsw-alias-label-tertiary: #adb2b8; --dsw-alias-label-caption: #81858c;
+        --dsw-alias-bg-base: #151517; --dsw-alias-border-l1: rgba(255,255,255,.06); --dsw-alias-border-l2: rgba(255,255,255,.12);
+        --dsw-alias-border-l3: rgba(255,255,255,.16); --dsw-alias-interactive-bg-hover: rgba(255,255,255,.08);
+        --dsw-alias-button-ghost-active-border: rgba(86,134,254,.5); --dsw-alias-button-ghost-active-fill: rgba(86,134,254,.1);
+        --dsw-alias-state-error-primary: #f25a5a; --dsw-alias-state-success-primary: #22c55e; --dsw-specific-tip: #353638;
+        margin: 0; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: 16px/28px Inter, system-ui, sans-serif;
+      }
+      main { max-width: 760px; margin: 0 auto; padding: 40px 16px 140px; }
+      .user { display: flex; justify-content: flex-end; margin: 18px 0; }
+      .user .ds-message { background: #2b2c2f; padding: 6px 14px; border-radius: 14px; }
+      .ds-think-content { color: #81858c; font-size: 13px; border-left: 2px solid #353638; padding-left: 12px; margin-bottom: 8px; white-space: pre-wrap; }
+      .ds-markdown p { margin: 0 0 10px; white-space: pre-wrap; }
+      .md-code-block { border: 1px solid rgba(255,255,255,.12); border-radius: 12px; margin: 10px 0; padding: 10px; }
+      form { position: fixed; bottom: 16px; left: 0; right: 0; max-width: 760px; margin: 0 auto; background: #2b2c2f; border: 1px solid rgba(255,255,255,.12); border-radius: 24px; padding: 12px; box-sizing: border-box; }
+      textarea { width: 100%; height: 44px; box-sizing: border-box; background: none; color: inherit; border: 0; outline: 0; resize: none; font: inherit; }
+      .composer-row { display: flex; align-items: center; justify-content: space-between; }
+      .composer-toggles { display: flex; align-items: center; gap: 8px; }
+      .composer-send { width: 34px; height: 34px; border-radius: 50%; background: var(--dsw-alias-brand-primary); display: flex; align-items: center; justify-content: center; }
+      .ds-toggle-button { box-sizing: border-box; display: inline-flex; align-items: center; height: 34px; padding: 10px; border-radius: 18px; font-size: 13px; font-weight: 500; border: 1px solid var(--dsw-alias-border-l2); }
+      .ds-toggle-button--selected { color: var(--dsw-alias-brand-text); border-color: var(--dsw-alias-button-ghost-active-border); background-color: var(--dsw-alias-button-ghost-active-fill); }
+    </style>
+  </head>
+  <body>
+    <main class="ds-virtual-list"><div id="messages"></div></main>
+    <form onsubmit="return false">
+      <textarea id="composer" placeholder="Message DeepSeek"></textarea>
+      <div class="composer-row">
+        <div class="composer-toggles">
+          <div class="ds-toggle-button ds-toggle-button--m ds-toggle-button--selected">DeepThink</div>
+          <div class="ds-toggle-button ds-toggle-button--m ds-toggle-button--selected">Search</div>
+        </div>
+        <div class="composer-send">↑</div>
+      </div>
+    </form>
+    <script>
+      // Reproduces the behavior of the real page that the extension depends on: requests through
+      // XMLHttpRequest, patches parsed cumulatively from responseText, and history on load.
+      const sessionId = location.pathname.split('/').pop();
+      const list = document.getElementById('messages');
+      const composer = document.getElementById('composer');
+      let busy = false;
+      let lastMessageId = null;
+
+      function row(key, className) {
+        const item = document.createElement('div');
+        item.setAttribute('data-virtual-list-item-key', key);
+        item.className = className;
+        list.append(item);
+        return item;
+      }
+
+      function addUser(key, text) {
+        const item = row(key, 'user');
+        const bubble = document.createElement('div');
+        bubble.className = 'ds-message';
+        bubble.textContent = text;
+        item.append(bubble);
+      }
+
+      function renderMarkdown(target, source) {
+        target.replaceChildren();
+        for (const [index, part] of source.split(/```/).entries()) {
+          if (index % 2 === 1) {
+            const newline = part.indexOf('\n');
+            const block = document.createElement('div');
+            block.className = 'md-code-block md-code-block-dark';
+            const banner = document.createElement('div');
+            banner.className = 'md-code-block-banner-wrap';
+            banner.textContent = part.slice(0, newline);
+            const pre = document.createElement('pre');
+            pre.textContent = part.slice(newline + 1);
+            block.append(banner, pre);
+            target.append(block);
+          } else if (part.trim()) {
+            const paragraph = document.createElement('p');
+            paragraph.textContent = part.trim();
+            target.append(paragraph);
+          }
+        }
+      }
+
+      function addAssistant(key) {
+        const item = row(key, 'assistant');
+        const message = document.createElement('div');
+        message.className = 'ds-message';
+        const think = document.createElement('div');
+        think.className = 'ds-think-content';
+        const markdown = document.createElement('div');
+        markdown.className = 'ds-markdown ds-assistant-message-main-content';
+        message.append(think, markdown);
+        item.append(message);
+        return (fragments) => {
+          think.textContent = fragments.filter((f) => f.type === 'THINK').map((f) => f.content).join('');
+          think.hidden = !think.textContent;
+          renderMarkdown(markdown, fragments.filter((f) => f.type === 'RESPONSE').map((f) => f.content).join(''));
+        };
+      }
+
+      function send(text) {
+        busy = true;
+        addUser(`user-${Date.now()}`, text);
+        const render = addAssistant(`assistant-${Date.now()}`);
+        const fragments = [];
+        let offset = 0;
+        let path = null;
+        let event = null;
+        let partial = '';
+
+        const consume = (chunk) => {
+          partial += chunk;
+          const lines = partial.split('\n');
+          partial = lines.pop();
+          for (const line of lines) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line === '') event = null;
+            else if (line.startsWith('data:')) {
+              const data = JSON.parse(line.slice(5));
+              if (event === 'ready') lastMessageId = data.response_message_id;
+              if (event) continue;
+              if (data.p !== undefined) path = data.p;
+              if (data.p === undefined && data.v && data.v.response) fragments.push(...data.v.response.fragments);
+              else if (path === 'response/fragments' && Array.isArray(data.v)) fragments.push(...data.v);
+              else if (/content$/.test(path || '') && typeof data.v === 'string') fragments[fragments.length - 1].content += data.v;
+            }
+          }
+          render(fragments);
+        };
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/v0/chat/completion');
+        xhr.setRequestHeader('content-type', 'application/json');
+        xhr.setRequestHeader('authorization', 'Bearer mock');
+        xhr.onreadystatechange = () => {
+          if (xhr.readyState < 3) return;
+          const text = xhr.responseText;
+          consume(text.slice(offset));
+          offset = text.length;
+          if (xhr.readyState === 4) busy = false;
+        };
+        xhr.send(JSON.stringify({ chat_session_id: sessionId, parent_message_id: lastMessageId, model_type: 'default', prompt: text, ref_file_ids: [], thinking_enabled: true, search_enabled: true, action: null, preempt: false }));
+      }
+
+      composer.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || event.shiftKey) return;
+        event.preventDefault();
+        const text = composer.value.trim();
+        if (!text || busy) return;
+        composer.value = '';
+        send(text);
+      });
+
+      const history = new XMLHttpRequest();
+      history.open('GET', `/api/v0/chat/history_messages?chat_session_id=${sessionId}&cache_version=7&cache_reset_at=9`);
+      history.onload = () => {
+        const { chat_messages: messages } = JSON.parse(history.responseText).data.biz_data;
+        for (const message of messages) {
+          lastMessageId = message.message_id;
+          if (message.role === 'USER') addUser(`m${message.message_id}`, message.fragments[0].content);
+          else addAssistant(`m${message.message_id}`)(message.fragments);
+        }
+      };
+      history.send();
+    </script>
+  </body>
+</html>
