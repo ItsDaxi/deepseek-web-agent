@@ -78,7 +78,7 @@ A command answers in a small panel above the composer, which closes by itself or
 
 `/evil` adds a text of your own to the hidden prompt, next to the one the extension already sends. Write the text in a file called `evil.txt`, in the install folder beside `host` and `extension`. With the Windows setup that is `%LOCALAPPDATA%\DeepSeekShellTool\`, and a setup update leaves the file alone. When you install from source it is the root of the project, where git ignores it. `/evil show` prints the exact path and tells you if the file is missing.
 
-`/evil on` reads the file and turns the feature on. The text goes out with your next message in each chat, once, and again only if it changes. It sits in a hidden block, so it never shows in the chat. `/evil reload` reads the file again after you edit it, and `/evil off` stops it and tells a chat that already has the text to ignore it. The file is cut at 20,000 characters. Only that one file is read, and the text is never taken from the web.
+`/evil on` reads the file and turns the feature on. The text goes out with your next message in each chat, once, and again only if it changes. It sits in a hidden block, so it never shows in the chat. `/evil reload` reads the file again after you edit it, and `/evil off` stops it and tells a chat that already has the text to ignore it. The file has no size limit of its own: a long text travels from the host to the extension in pieces and is joined again. DeepSeek has a limit on the length of a message that this extension cannot see, so above 100,000 characters `/evil` warns you that DeepSeek may refuse it. Only that one file is read, and the text is never taken from the web.
 
 ### Update notice
 

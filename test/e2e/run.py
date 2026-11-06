@@ -498,6 +498,12 @@ def run(context, server):
     check("a changed text is sent again", "Be very short." in send_and_wait("third message"))
     run_command("/evil show")
     check("/evil show names the file and its text", wait_until(lambda: "State: on" in shadow.text() and "Be very short." in shadow.text() and str(PROMPT_FILE) in shadow.text(), message="evil show"))
+    # No limit: a text of hundreds of thousands of characters crosses the whole chain unchanged.
+    huge = ("Pensa in grande. " * 20000).strip()
+    PROMPT_FILE.write_text(huge, encoding="utf-8")
+    run_command("/evil reload")
+    check("a very long file is read whole", wait_until(lambda: f"Reloaded: {len(huge)} characters" in shadow.text(), timeout=30, message="huge reload"))
+    check("it is sent whole with the next message", huge in send_and_wait("a long one"))
     run_command("/evil off")
     check("/evil off turns it off", wait_until(lambda: stored("evilOn") is False, message="evil off"))
     check("the chat is told to forget them", "no longer apply" in send_and_wait("fourth message"))

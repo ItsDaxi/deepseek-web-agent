@@ -78,9 +78,12 @@ test('the prompt file is read with its text, and its problems are named', async 
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'dsx-prompt-'));
   const file = path.join(folder, 'evil.txt');
   const host = startHost({ DSX_PROMPT_FILE: file });
+  // The text comes in numbered pieces, and the answer is whole with the last one.
   const ask = async (id) => {
     host.send({ type: 'read-prompt', id });
-    return host.waitFor((m) => m.type === 'prompt-file' && m.id === id);
+    const last = await host.waitFor((m) => m.type === 'prompt-file' && m.id === id && !(m.part < m.parts - 1));
+    const pieces = host.messages.filter((m) => m.type === 'prompt-file' && m.id === id);
+    return { ...last, text: last.error ? null : pieces.map((m) => m.text).join(''), pieces: pieces.length };
   };
   try {
     assert.equal((await ask('missing')).error, 'missing');
@@ -92,13 +95,17 @@ test('the prompt file is read with its text, and its problems are named', async 
     const read = await ask('read');
     assert.equal(read.error, null);
     assert.equal(read.text, 'Be brief.\nAnswer in Italian.');
-    assert.equal(read.truncated, false);
+    assert.equal(read.pieces, 1);
     assert.equal(read.path, file);
 
-    fs.writeFileSync(file, 'x'.repeat(25_000));
-    const long = await ask('long');
-    assert.equal(long.text.length, 20_000);
-    assert.equal(long.truncated, true);
+    // No limit: a long text arrives whole, in several pieces, with accents and emoji intact even
+    // when a piece ends in the middle of one.
+    const unit = 'Perché 😀 àèìòù. ';
+    const long = unit.repeat(40_000);
+    fs.writeFileSync(file, long);
+    const big = await ask('long');
+    assert.ok(big.pieces > 5, String(big.pieces));
+    assert.equal(big.text, long.trim());
   } finally {
     host.stop();
     fs.rmSync(folder, { recursive: true, force: true });

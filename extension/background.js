@@ -72,7 +72,9 @@ function connectHost() {
     }
     const owner = jobOwners.get(message.id);
     if (owner) owner.postMessage(message);
-    if (message.type === 'exit' || message.type === 'folder-picked' || message.type === 'prompt-file') jobOwners.delete(message.id);
+    // A text sent in pieces keeps its owner until the last piece has gone through.
+    const lastPromptPiece = message.type === 'prompt-file' && !(message.part < message.parts - 1);
+    if (message.type === 'exit' || message.type === 'folder-picked' || lastPromptPiece) jobOwners.delete(message.id);
   });
 
   nativePort.onDisconnect.addListener(() => {

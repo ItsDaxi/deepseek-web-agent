@@ -63,25 +63,26 @@ function extensionVersion() {
 // (beside host/ and extension/), where an update does not touch it. Only this one fixed file is read.
 // DSX_PROMPT_FILE moves it, which is how the tests avoid touching a real one.
 const PROMPT_FILE = process.env.DSX_PROMPT_FILE || path.join(__dirname, '..', 'evil.txt');
-const MAX_PROMPT_CHARS = 20_000;
 
+// The file has no size limit of its own. The browser caps one message from the host at 1 MB, so the
+// text travels in pieces of MAX_CHUNK_CHARS, numbered, and the extension joins them again.
 function readPromptFile({ id }) {
-  const reply = { type: 'prompt-file', id, path: PROMPT_FILE, text: null, truncated: false, error: null };
+  const reply = { type: 'prompt-file', id, path: PROMPT_FILE, text: null, error: null, part: 0, parts: 1 };
+  let text = '';
   try {
-    let text = fs.readFileSync(PROMPT_FILE, 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n').trim();
-    if (!text) {
-      reply.error = 'empty';
-    } else {
-      if (text.length > MAX_PROMPT_CHARS) {
-        text = text.slice(0, MAX_PROMPT_CHARS);
-        reply.truncated = true;
-      }
-      reply.text = text;
-    }
+    text = fs.readFileSync(PROMPT_FILE, 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n').trim();
+    if (!text) reply.error = 'empty';
   } catch (error) {
     reply.error = error.code === 'ENOENT' ? 'missing' : error.message;
   }
-  send(reply);
+  if (reply.error) {
+    send(reply);
+    return;
+  }
+  const parts = Math.ceil(text.length / MAX_CHUNK_CHARS);
+  for (let part = 0; part < parts; part += 1) {
+    send({ ...reply, text: text.slice(part * MAX_CHUNK_CHARS, (part + 1) * MAX_CHUNK_CHARS), part, parts });
+  }
 }
 
 function defaultShell() {

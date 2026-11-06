@@ -85,7 +85,7 @@
         pendingPromptFile = null;
         resolve({ text: null, error: 'The shell host did not answer.' });
       }, PROMPT_ANSWER_MS);
-      pendingPromptFile = { id, done: (answer) => { clearTimeout(timer); resolve(answer); } };
+      pendingPromptFile = { id, pieces: [], done: (answer) => { clearTimeout(timer); resolve(answer); } };
       port.postMessage({ type: 'read-prompt', id });
     });
   }
@@ -175,8 +175,15 @@
         break;
       case 'prompt-file':
         if (pendingPromptFile && message.id === pendingPromptFile.id) {
-          pendingPromptFile.done(message);
-          pendingPromptFile = null;
+          // The text arrives in numbered pieces, and the answer is complete with the last one. A host
+          // that sends it whole has no part numbers and is a single piece.
+          pendingPromptFile.pieces.push(message.text || '');
+          if (!(message.part < message.parts - 1)) {
+            const done = pendingPromptFile.done;
+            const text = pendingPromptFile.pieces.join('');
+            pendingPromptFile = null;
+            done({ ...message, text: message.error ? null : text });
+          }
         }
         break;
       case 'host-status':
@@ -687,6 +694,15 @@
     return [answer.error || 'evil.txt could not be read.'];
   }
 
+  // The file has no limit here. DeepSeek has one of its own, which is not known, so a very long text
+  // only gets a warning.
+  const LONG_PROMPT_CHARS = 100000;
+
+  function describePromptSize(text) {
+    const size = `${text.length} characters`;
+    return text.length > LONG_PROMPT_CHARS ? `${size}, which is very long: DeepSeek may refuse a message this size` : size;
+  }
+
   const PREVIEW_LINES = 6;
   const PREVIEW_LINE_CHARS = 110;
 
@@ -777,12 +793,12 @@
           if (!answer.text) return { error: true, lines: [state, ...describePromptProblem(answer)] };
           const preview = answer.text.split('\n').filter((line) => line.trim()).slice(0, PREVIEW_LINES)
             .map((line) => (line.length > PREVIEW_LINE_CHARS ? `${line.slice(0, PREVIEW_LINE_CHARS)}…` : line));
-          return { lines: [state, `File: ${answer.path}`, `Size: ${answer.text.length} characters${answer.truncated ? ' (cut to the first 20000)' : ''}`, '', ...preview] };
+          return { lines: [state, `File: ${answer.path}`, `Size: ${describePromptSize(answer.text)}`, '', ...preview] };
         }
         if (arg === 'on' || arg === 'reload') {
           const answer = await loadExtraPrompt();
           if (!answer.text) return { error: true, lines: describePromptProblem(answer) };
-          const size = `${answer.text.length} characters${answer.truncated ? ' (cut to the first 20000)' : ''}`;
+          const size = describePromptSize(answer.text);
           if (arg === 'reload') {
             return { lines: [settings.evilOn ? `Reloaded: ${size}.` : `The file reads fine (${size}), but it is off. Use /evil on.`] };
           }
