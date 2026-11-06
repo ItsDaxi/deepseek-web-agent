@@ -35,6 +35,24 @@ function Invoke-Checked([string]$what, [scriptblock]$command) {
   if ($LASTEXITCODE -ne 0) { throw "$what failed (exit code $LASTEXITCODE)." }
 }
 
+# For a command whose failure is an answer rather than an error, such as a release that does not exist.
+# Windows PowerShell 5.1 turns anything a native command writes to stderr into a terminating error
+# while $ErrorActionPreference is Stop, so the preference is relaxed for the call.
+function Test-Succeeds([scriptblock]$command) {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & $command *> $null } finally { $ErrorActionPreference = $previous }
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Get-Output([scriptblock]$command) {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { $output = & $command 2> $null } finally { $ErrorActionPreference = $previous }
+  if ($LASTEXITCODE -ne 0) { return $null }
+  return $output
+}
+
 function Write-Step([string]$text) { Write-Output "`n== $text" }
 
 function Set-JsonVersion([string]$path, [string]$value) {
@@ -59,8 +77,7 @@ if ((git rev-parse --abbrev-ref HEAD) -ne 'main') { throw 'Switch to the main br
 if (git status --porcelain) { throw 'There are uncommitted changes. Commit them first.' }
 Invoke-Checked 'git fetch' { git fetch --quiet --tags origin }
 if ([int](git rev-list --count 'HEAD..origin/main') -gt 0) { throw 'The remote has commits you do not have. Pull first.' }
-$existing = & $gh release view $tag --repo $repo 2>$null
-if ($LASTEXITCODE -eq 0) { throw "The release $tag already exists." }
+if (Test-Succeeds { & $gh release view $tag --repo $repo }) { throw "The release $tag already exists." }
 Write-Output "Releasing $tag (current version $current)."
 
 # ---- Version, tests and build -------------------------------------------------------------------
@@ -87,7 +104,7 @@ try {
   if ($NotesFile) {
     $notes = [IO.File]::ReadAllText((Resolve-Path $NotesFile))
   } else {
-    $previous = git describe --tags --abbrev=0 2>$null
+    $previous = Get-Output { git describe --tags --abbrev=0 }
     $range = if ($previous) { "$previous..HEAD" } else { 'HEAD' }
     $subjects = @(git log --pretty=format:'%s' $range | Where-Object { $_ -notmatch '^Release v' })
     $list = if ($subjects.Count) { ($subjects | ForEach-Object { "- $_" }) -join "`n" } else { '- Small fixes.' }
@@ -136,7 +153,7 @@ try {
 }
 finally {
   # A dry run, or a failure before the commit, leaves the version files as they were.
-  if ($DryRun -or -not (git log -1 --pretty=%s | Select-String -SimpleMatch "Release $tag" -Quiet)) {
-    git checkout -- extension/manifest.json package.json 2>$null
+  if ($DryRun -or -not ((git log -1 --pretty=%s) -like "Release $tag*")) {
+    [void](Test-Succeeds { git checkout -- extension/manifest.json package.json })
   }
 }
