@@ -326,7 +326,7 @@
     const wave = createWave();
     let mode = 'ask';
     // What each tooltip says right now. The tooltips read it when they show, and update() fills it in.
-    const tips = { pill: '', folder: '', permission: '', update: 'Open the new release on GitHub' };
+    const tips = { pill: '', folder: '', permission: '', update: 'Open the release page. Run the new setup, then reload the extension.' };
     tooltip.bind(pillBox, () => tips.pill);
     tooltip.bind(updateLink, () => tips.update);
     tooltip.bind(folderButton, () => tips.folder);

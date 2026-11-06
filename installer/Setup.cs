@@ -12,6 +12,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -165,6 +166,22 @@ namespace DsxSetup
                 + launcher.Replace("\\", "\\\\") + "\",\n  \"type\": \"stdio\",\n  \"allowed_origins\": [\"chrome-extension://" + ExtensionId + "/\"]\n}\n";
         }
 
+        // The version the extension carries, so Installed apps always shows what was really installed.
+        static string InstalledVersion()
+        {
+            try
+            {
+                string text = File.ReadAllText(Path.Combine(ExtensionDir, "manifest.json"));
+                Match match = Regex.Match(text, "\"version\"\\s*:\\s*\"([^\"]+)\"");
+                if (match.Success) return match.Groups[1].Value;
+            }
+            catch (IOException)
+            {
+                // The files were just copied, so this should not happen. The entry then has no version.
+            }
+            return "";
+        }
+
         static void RegisterUninstaller()
         {
             string current = Application.ExecutablePath;
@@ -177,7 +194,7 @@ namespace DsxSetup
             {
                 key.SetValue("DisplayName", AppName);
                 key.SetValue("DisplayIcon", copy);
-                key.SetValue("DisplayVersion", "0.1.0");
+                key.SetValue("DisplayVersion", InstalledVersion());
                 key.SetValue("InstallLocation", AppDir);
                 key.SetValue("UninstallString", "\"" + copy + "\" --uninstall");
                 key.SetValue("NoModify", 1, RegistryValueKind.DWord);

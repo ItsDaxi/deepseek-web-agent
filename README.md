@@ -60,7 +60,15 @@ When you open DeepSeek, the extension asks GitHub for the latest release of this
 
 This is the only request the extension makes besides the ones to DeepSeek. It goes straight from your browser to `api.github.com`, carries no account and none of your data, and happens at most once an hour. Repeat requests ask GitHub only whether anything changed, which it answers without counting against its rate limit. GitHub sees your IP address, as with any visit. To turn it off, run `chrome.storage.local.set({ checkForUpdates: false })` in the extension's service worker console.
 
-For maintainers: the notice compares the `version` in `extension/manifest.json` with the release tag, so raise the version before you tag a release.
+## Releasing
+
+For maintainers. The update notice compares the `version` in `extension/manifest.json` with the latest release tag, so every release has to raise it. One script does the whole job: it raises the version, runs the tests, builds the setup, commits, pushes, and creates the GitHub release with the setup attached and its SHA-256 in the notes.
+
+```bash
+powershell -ExecutionPolicy Bypass -File installer/release.ps1 -Version 0.2.0
+```
+
+It needs Node.js, git and the [GitHub CLI](https://cli.github.com) logged in to the account that owns the repository. Add `-DryRun` to rehearse everything except the commit, the push and the publishing, and `-WithE2E` to run the end-to-end test too.
 
 ## Permission modes
 
