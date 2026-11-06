@@ -62,7 +62,16 @@ Tab does not move the focus out of the composer, so it can be used for completio
 
 A message that only starts with a slash, such as `/etc/hosts what is this file`, is sent as usual. The menu and the keys react only to real key presses, so a script on the page cannot run a command by faking an Enter.
 
-The commands are placeholders for now: the menu works, and each command answers that it is not available yet.
+| Command | What it does |
+| --- | --- |
+| `/mode manual` or `/mode bypass` | Switches the permission mode, with the same wave as the button. |
+| `/cd` | Opens the folder dialog to choose the working directory. |
+| `/status` | Shows the extension version, the shell host, the mode, the folder and the thinking setting. |
+| `/thinking collapse` or `/thinking default` | Keeps the thinking blocks collapsed, or leaves them as DeepSeek shows them. |
+| `/update` | Asks GitHub for the latest release now, and shows the update pill again if it was closed. It works even when the automatic check is off, because you are asking for it. |
+| `/help` | Lists the commands. |
+
+A command answers in a small panel above the composer, which closes by itself or when you click it.
 
 ### Update notice
 

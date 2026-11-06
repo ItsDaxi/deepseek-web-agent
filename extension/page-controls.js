@@ -384,7 +384,12 @@
       if (permission.host.parentElement !== group) group.append(permission.host);
     }
 
-    return { update, mount };
+    // The same wave as a click on the button, for a mode changed some other way.
+    function playModeWave(next) {
+      wave.play(permission.host, next === 'bypass' ? 'danger' : 'light');
+    }
+
+    return { update, mount, playModeWave };
   }
 
   root.DsxPageControls = { createPageControls, findComposerBox };

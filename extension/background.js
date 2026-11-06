@@ -9,6 +9,7 @@ const MAX_DIAGNOSTICS = 30;
 // The release is looked up at most once an hour, a failed try included. GitHub allows 60 requests an
 // hour per address without logging in, so this stays far below it.
 const UPDATE_CHECK_EVERY_MS = 60 * 60 * 1000;
+const UPDATE_FORCE_MIN_MS = 30 * 1000;
 const UPDATE_FETCH_TIMEOUT_MS = 8000;
 const MAX_ETAG_CHARS = 200;
 // How long the tabs get to say whether they can be reloaded, how long a reload remembers which tabs
@@ -115,10 +116,12 @@ async function fetchLatestTag(previous) {
   return { tag, etag: etag && etag.length <= MAX_ETAG_CHARS ? etag : null };
 }
 
-async function lookUpLatestTag() {
+// Returns what is known about the latest release: { tag, failed }. A lookup the user asked for
+// (`force`) skips the hourly wait, but never repeats within half a minute.
+async function lookUpLatestTag(force = false) {
   const { updateCheck } = await chrome.storage.local.get({ updateCheck: null });
   const age = updateCheck ? Date.now() - updateCheck.checkedAt : Infinity;
-  if (age < UPDATE_CHECK_EVERY_MS) return updateCheck.tag;
+  if (age < (force ? UPDATE_FORCE_MIN_MS : UPDATE_CHECK_EVERY_MS)) return updateCheck;
 
   let entry;
   try {
@@ -129,16 +132,24 @@ async function lookUpLatestTag() {
     entry = { checkedAt: Date.now(), tag: updateCheck ? updateCheck.tag : null, etag: updateCheck ? updateCheck.etag : null, failed: true };
   }
   await chrome.storage.local.set({ updateCheck: entry });
-  return entry.tag;
+  return entry;
 }
 
-async function checkForUpdate() {
+// `force` is a lookup the user asked for with /update. It is allowed even when the automatic check
+// is turned off, because the user is asking for it now.
+async function checkForUpdate(force = false) {
   const { checkForUpdates } = await chrome.storage.local.get({ checkForUpdates: true });
-  if (checkForUpdates === false) return { available: false };
+  if (checkForUpdates === false && !force) return { available: false };
   // Several tabs can ask at once, and they share one lookup.
-  updateLookup = updateLookup || lookUpLatestTag().finally(() => { updateLookup = null; });
-  const tag = await updateLookup;
-  return DsxUpdateCheck.status(chrome.runtime.getManifest().version, tag);
+  updateLookup = updateLookup || lookUpLatestTag(force).finally(() => { updateLookup = null; });
+  const entry = await updateLookup;
+  const current = chrome.runtime.getManifest().version;
+  return {
+    ...DsxUpdateCheck.status(current, entry && entry.tag),
+    current,
+    latest: entry ? entry.tag : null,
+    failed: !entry || entry.failed,
+  };
 }
 
 // ---- Reload after an update ----------------------------------------------------------------------
@@ -229,9 +240,10 @@ function handleTabMessage(port, message) {
       if (reloadQuery) reloadQuery.answer(port, message.busy !== false);
       break;
     case 'check-update':
-      checkForUpdate()
-        .then((status) => port.postMessage({ type: 'update-status', ...status }))
-        .catch(() => {});
+      checkForUpdate(message.force === true)
+        .then((status) => port.postMessage({ type: 'update-status', forced: message.force === true, ...status }))
+        // A forced lookup always gets an answer, so the command that asked is not left waiting.
+        .catch(() => port.postMessage({ type: 'update-status', forced: message.force === true, available: false, failed: true }));
       break;
     case 'connect-host':
       connectHost();

@@ -32,6 +32,8 @@
   let hostError = null;
   // The newer release the background script found, or null.
   let updateInfo = null;
+  // Set while /update waits for the answer of the lookup it asked for.
+  let pendingUpdateAnswer = null;
   let folderRequest = null;
   let folderError = null;
   let port = null;
@@ -127,6 +129,11 @@
       case 'update-status':
         updateInfo = message.available ? { tag: message.tag, url: message.url } : null;
         renderControls();
+        // A lookup the user asked for with /update is waiting for this answer.
+        if (message.forced && pendingUpdateAnswer) {
+          pendingUpdateAnswer(message);
+          pendingUpdateAnswer = null;
+        }
         break;
       case 'host-status':
         hostInfo = message.connected ? message.info : null;
@@ -609,19 +616,61 @@
   thinkCollapser.start();
 
   // ---- Slash commands --------------------------------------------------------------------------
-  // Placeholders for now: the menu, the filter, Tab and Enter all work, and each command only says
-  // it is not available yet. The real behaviour comes later, one command at a time.
+  // The menu only runs these after a real key press or click, so a script on the page cannot change
+  // the permission mode by faking one. A command answers with { lines, error }, shown above the composer.
+  const UPDATE_ANSWER_MS = 10000;
+
+  function describeUpdate(answer) {
+    if (answer.failed && !answer.latest) return { error: true, lines: ['GitHub could not be reached. Try again later.'] };
+    const lines = [];
+    if (answer.available) {
+      // The pill comes back even if the user had closed it for this release.
+      saveSettings({ dismissedUpdate: '' });
+      lines.push(`Update available: ${answer.tag}.`, 'Click the blue pill at the top right to open the release page.');
+    } else {
+      lines.push(`You have the latest version (v${answer.current}).`);
+    }
+    if (answer.failed) lines.push('GitHub could not be reached just now, so this may be out of date.');
+    return { lines };
+  }
+
   const SLASH_COMMANDS = [
-    { name: 'help', description: 'Show the available commands' },
+    {
+      name: 'help',
+      description: 'Show the available commands',
+      run: () => ({
+        lines: SLASH_COMMANDS.map((command) => {
+          const options = command.args ? ` ${command.args.map((arg) => arg.value).join('|')}` : '';
+          return `/${command.name}${options}: ${command.description}`;
+        }),
+      }),
+    },
     {
       name: 'mode',
       description: 'Switch between manual and bypass',
+      // Manual comes first, so a careless Enter right after "/mode " picks the safe one.
       args: [
         { value: 'manual', description: 'Ask before every command' },
         { value: 'bypass', description: 'Run commands without asking' },
       ],
+      run: (arg) => {
+        if (arg !== 'manual' && arg !== 'bypass') return { error: true, lines: ['Use /mode manual or /mode bypass.'] };
+        const next = arg === 'bypass' ? 'bypass' : 'ask';
+        if (settings.mode === next) return { lines: [`Already in ${arg} mode.`] };
+        controls.playModeWave(next);
+        saveSettings({ mode: next });
+        return { lines: [next === 'bypass' ? 'Bypass: commands now run without asking.' : 'Manual: commands now ask before running.'] };
+      },
     },
-    { name: 'cd', description: 'Choose the working folder' },
+    {
+      name: 'cd',
+      description: 'Choose the working folder',
+      run: () => {
+        if (!port || !hostInfo) return { error: true, lines: ['The shell host is not connected.'] };
+        startFolderPick();
+        return { lines: ['Choose a folder in the dialog that opened.'] };
+      },
+    },
     {
       name: 'thinking',
       description: 'Keep the thinking blocks collapsed or not',
@@ -629,14 +678,50 @@
         { value: 'collapse', description: 'Keep them collapsed' },
         { value: 'default', description: 'Leave them as DeepSeek shows them' },
       ],
+      run: (arg) => {
+        if (arg !== 'collapse' && arg !== 'default') return { error: true, lines: ['Use /thinking collapse or /thinking default.'] };
+        saveSettings({ collapseThinking: arg === 'collapse' });
+        return { lines: [arg === 'collapse' ? 'Thinking blocks are kept collapsed.' : 'Thinking blocks are left as DeepSeek shows them.'] };
+      },
     },
-    { name: 'status', description: 'Show the connection, mode and folder' },
-    { name: 'update', description: 'Look for a new version now' },
+    {
+      name: 'status',
+      description: 'Show the connection, mode and folder',
+      run: () => ({
+        lines: [
+          `Extension: v${chrome.runtime.getManifest().version}${updateInfo ? ` (${updateInfo.tag} is available)` : ''}`,
+          `Shell host: ${hostInfo ? `connected, ${hostInfo.defaultShell}` : 'not connected'}`,
+          `Mode: ${settings.mode === 'bypass' ? 'bypass' : 'manual'}`,
+          `Folder: ${settings.cwd || (hostInfo && hostInfo.home) || 'not set'}`,
+          `Thinking blocks: ${settings.collapseThinking === false ? 'left as DeepSeek shows them' : 'kept collapsed'}`,
+        ],
+      }),
+    },
+    {
+      name: 'update',
+      description: 'Look for a new version now',
+      run: () => new Promise((resolve) => {
+        if (!port) {
+          resolve({ error: true, lines: ['The extension is not connected.'] });
+          return;
+        }
+        // An answer that never comes must not leave the command waiting.
+        const timer = setTimeout(() => {
+          pendingUpdateAnswer = null;
+          resolve({ error: true, lines: ['GitHub did not answer in time.'] });
+        }, UPDATE_ANSWER_MS);
+        pendingUpdateAnswer = (answer) => {
+          clearTimeout(timer);
+          resolve(describeUpdate(answer));
+        };
+        port.postMessage({ type: 'check-update', force: true });
+      }),
+    },
   ];
 
   createSlashCommands({
     commands: SLASH_COMMANDS,
-    run: (name) => ({ lines: [`/${name} is not available yet.`] }),
+    run: (name, arg) => SLASH_COMMANDS.find((command) => command.name === name).run(arg),
     findBox: findComposerBox,
   }).start();
 
