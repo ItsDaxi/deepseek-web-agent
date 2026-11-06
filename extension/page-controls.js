@@ -8,6 +8,7 @@
     folder: '<path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2"/>',
     shield: '<path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3"/><path d="M9 12l2 2l4 -4"/>',
     bolt: '<path d="M13 3v7h6l-8 11v-7h-6l8 -11"/>',
+    arrowUp: '<path d="M12 19v-14"/><path d="M18 11l-6 -6l-6 6"/>',
   };
 
   const BUTTON_STYLES = `
@@ -31,21 +32,21 @@
     @media (prefers-reduced-motion: reduce) { button { transition: none; } }
   `;
 
+  // The top right corner: the connection pill, and to its left a link to the new release when
+  // there is one. Both share one fixed row, so they never overlap whatever their width.
   const PILL_STYLES = `
-    :host { position: fixed; top: 12px; right: 16px; z-index: 2147483000; }
-    div { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; font: 12px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--dsw-alias-label-secondary, #cfd3d6); background: var(--dsw-specific-tip, #353638); border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.06)); }
-    i { width: 7px; height: 7px; flex: none; border-radius: 50%; }
-  `;
-
-  // Sits under the status pill when a newer release exists.
-  const NOTICE_STYLES = `
-    :host { position: fixed; top: 50px; right: 16px; z-index: 2147483000; }
-    div { display: flex; align-items: center; gap: 10px; padding: 5px 6px 5px 12px; border-radius: 12px; font: 12px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--dsw-alias-label-secondary, #cfd3d6); background: var(--dsw-specific-tip, #353638); border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.06)); }
-    a { color: var(--dsw-alias-brand-text, #679efe); font-weight: 500; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    button { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; font: inherit; font-size: 16px; line-height: 1; }
-    button:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); }
-    button:focus-visible, a:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5686fe); outline-offset: 1px; }
+    :host { position: fixed; top: 12px; right: 16px; z-index: 2147483000; display: flex; align-items: center; gap: 8px; }
+    .status { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; font: 12px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--dsw-alias-label-secondary, #cfd3d6); background: var(--dsw-specific-tip, #353638); border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.06)); }
+    .status i { width: 7px; height: 7px; flex: none; border-radius: 50%; }
+    .update { display: inline-flex; align-items: center; height: 30px; border-radius: 999px; font: 500 12px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--dsw-alias-brand-text, #679efe); border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 55%, transparent); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 14%, transparent); transition: background .2s ease; }
+    .update:hover { background: color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 24%, transparent); }
+    .update[hidden] { display: none; }
+    .update a { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 4px 0 11px; color: inherit; text-decoration: none; border-radius: 999px; }
+    .update button { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-right: 3px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; font: inherit; font-size: 16px; line-height: 1; }
+    .update button:hover { background: color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 24%, transparent); }
+    .update a:focus-visible, .update button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5686fe); outline-offset: 1px; }
+    svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    @media (prefers-reduced-motion: reduce) { .update { transition: none; } }
   `;
 
   const DOT_COLORS = { ok: 'var(--dsw-alias-state-success-primary, #22c55e)', warn: '#e5a13a' };
@@ -301,31 +302,33 @@
   }
 
   function createPageControls({ onPickFolder, onChangeMode, onDismissUpdate }) {
-    const pill = attach('dsx-status', PILL_STYLES, '<div><i></i><span></span></div>');
-    const notice = attach(
-      'dsx-update',
-      NOTICE_STYLES,
-      '<div><span></span><a target="_blank" rel="noopener noreferrer">View on GitHub</a><button type="button" aria-label="Dismiss" data-action="dismiss-update">×</button></div>',
+    const pill = attach(
+      'dsx-status',
+      PILL_STYLES,
+      `<span class="update" hidden><a target="_blank" rel="noopener noreferrer">${iconMarkup('arrowUp')}<span></span></a><button type="button" aria-label="Dismiss" data-action="dismiss-update">×</button></span><div class="status"><i></i><span></span></div>`,
     );
-    const noticeText = notice.shadow.querySelector('span');
-    const noticeLink = notice.shadow.querySelector('a');
-    const noticeClose = notice.shadow.querySelector('button');
-    let noticeTag = '';
+    const updateBox = pill.shadow.querySelector('.update');
+    const updateLink = updateBox.querySelector('a');
+    const updateLabel = updateBox.querySelector('a span');
+    const updateClose = updateBox.querySelector('button');
+    const statusLabel = pill.shadow.querySelector('.status span');
+    let updateTag = '';
     const folder = attach('dsx-composer-button', BUTTON_STYLES, `<button type="button" data-action="pick-folder">${iconMarkup('folder')}</button>`);
     const permission = attach('dsx-composer-button', BUTTON_STYLES, '<button type="button" data-action="cycle-permission"></button>');
 
     // DeepSeek spaces its toggles with their own margins, so the first button brings its own.
     folder.host.style.marginRight = '8px';
 
-    const pillBox = pill.shadow.querySelector('div');
+    const pillBox = pill.shadow.querySelector('.status');
     const folderButton = folder.shadow.querySelector('button');
     const permissionButton = permission.shadow.querySelector('button');
     const tooltip = createTooltip();
     const wave = createWave();
     let mode = 'ask';
     // What each tooltip says right now. The tooltips read it when they show, and update() fills it in.
-    const tips = { pill: '', folder: '', permission: '' };
+    const tips = { pill: '', folder: '', permission: '', update: 'Open the new release on GitHub' };
     tooltip.bind(pillBox, () => tips.pill);
+    tooltip.bind(updateLink, () => tips.update);
     tooltip.bind(folderButton, () => tips.folder);
     tooltip.bind(permissionButton, () => tips.permission);
 
@@ -334,7 +337,7 @@
       if (event.isTrusted) handler();
     };
     folderButton.addEventListener('click', trusted(onPickFolder));
-    noticeClose.addEventListener('click', trusted(() => onDismissUpdate(noticeTag)));
+    updateClose.addEventListener('click', trusted(() => onDismissUpdate(updateTag)));
     permissionButton.addEventListener('click', trusted(() => {
       const next = mode === 'bypass' ? 'ask' : 'bypass';
       // The host sits in the page's own tree, so the wave can find the composer from it.
@@ -345,17 +348,17 @@
     function update({ alive, settings, hostInfo, hostError, picking, pickError, update: newerRelease }) {
       mode = settings.mode;
 
-      // The notice returns for the next release after the user closes this one.
-      noticeTag = newerRelease && newerRelease.tag !== settings.dismissedUpdate ? newerRelease.tag : '';
-      if (noticeTag) {
-        noticeText.textContent = `Update available: ${noticeTag}`;
-        noticeLink.href = newerRelease.url;
-      }
-      syncNotice();
+      // The link returns for the next release after the user closes this one. While it is hidden
+      // it holds no text, so nothing is left behind in the page.
+      updateTag = newerRelease && newerRelease.tag !== settings.dismissedUpdate ? newerRelease.tag : '';
+      updateBox.hidden = !updateTag;
+      updateLabel.textContent = updateTag ? `Update available: ${updateTag}` : '';
+      if (updateTag) updateLink.href = newerRelease.url;
+      else updateLink.removeAttribute('href');
 
       const status = !alive ? 'Reload page' : hostInfo ? 'Connected' : 'Not connected';
       pill.shadow.querySelector('i').style.background = alive && hostInfo ? DOT_COLORS.ok : DOT_COLORS.warn;
-      pill.shadow.querySelector('span').textContent = `Shell · ${status}`;
+      statusLabel.textContent = `Shell · ${status}`;
       tips.pill = alive && !hostInfo ? ['Run node host/install.js, then restart the browser.', hostError].filter(Boolean).join('\n') : '';
 
       const bypass = mode === 'bypass';
@@ -371,15 +374,8 @@
       tooltip.refresh();
     }
 
-    // The notice is only in the page while there is something to say, so it leaves no text behind.
-    function syncNotice() {
-      if (!noticeTag) notice.host.remove();
-      else if (document.body && !notice.host.isConnected) document.body.append(notice.host);
-    }
-
     // React owns the group's children, so this only adds to it and never moves anything of React's.
     function mount() {
-      syncNotice();
       if (document.body && !pill.host.isConnected) document.body.append(pill.host);
       if (document.body && !tooltip.host.isConnected) document.body.append(tooltip.host);
       const group = findComposerToggleGroup();
