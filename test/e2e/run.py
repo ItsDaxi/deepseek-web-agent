@@ -311,7 +311,8 @@ def run(context, server):
     page.reload()
     shadow = Shadow(page, context)
     check("cards return after a reload", wait_until(lambda: "exit 0" in shadow.card_text() and "exit 3" in shadow.card_text(), message="restored cards"))
-    check("restored output is available", "stopped by you" in shadow.card_text() and "rejected" in shadow.card_text())
+    # A stopped command shows "stopped" and a rejected one "rejected", each on its own card.
+    check("restored stopped and rejected cards", wait_until(lambda: "stopped" in shadow.card_text() and "rejected" in shadow.card_text(), message="restored outcomes"))
     assert_no_leaks(page, "after a reload")
     check("the hidden prompt is gone from history", "You have one tool" not in visible_text(page))
     pause(1.5)
