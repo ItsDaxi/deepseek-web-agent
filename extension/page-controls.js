@@ -387,5 +387,5 @@
     return { update, mount };
   }
 
-  root.DsxPageControls = { createPageControls };
+  root.DsxPageControls = { createPageControls, findComposerBox };
 })(globalThis);

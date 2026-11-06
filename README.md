@@ -54,6 +54,16 @@ All controls sit on the DeepSeek page, in the row with DeepThink and Search. The
 
 The model chooses the timeout of each command, up to 600 seconds.
 
+### Slash commands
+
+Type `/` at the start of the composer to open a menu of commands, in DeepSeek's own dropdown style. Keep typing to filter it. Arrow keys move, **Tab** completes the highlighted command, **Enter** runs it, and **Esc** closes the menu. A command that takes an argument, such as `/mode`, completes to `/mode ` and then suggests its arguments. A command is never sent to DeepSeek.
+
+Tab does not move the focus out of the composer, so it can be used for completion. Everywhere else on the page it works as usual.
+
+A message that only starts with a slash, such as `/etc/hosts what is this file`, is sent as usual. The menu and the keys react only to real key presses, so a script on the page cannot run a command by faking an Enter.
+
+The commands are placeholders for now: the menu works, and each command answers that it is not available yet.
+
 ### Update notice
 
 When you open DeepSeek, the extension asks GitHub for the latest release of this repository. If it is newer than the installed version, a blue "Update available" pill appears at the top right, next to the status pill. Click it to open the release page on GitHub, download the new setup there and run it. Close it with the × and it stays closed until the next release.

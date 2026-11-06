@@ -6,6 +6,11 @@ host/com.dsx.shell_host.json
 # The built setup, which bundles the Node.js runtime.
 dist/
 
+# Saved copies of the DeepSeek page, kept only as a reference for its styling. They hold the
+# page's own code and whatever was on screen when it was saved, so they never go in the repository.
+/DeepSeek - *
+/*_files/
+
 # Python bytecode from the end-to-end test.
 __pycache__/
 *.pyc

@@ -4,8 +4,9 @@
   'use strict';
 
   const { createCardStore } = globalThis.DsxCards;
-  const { createPageControls } = globalThis.DsxPageControls;
+  const { createPageControls, findComposerBox } = globalThis.DsxPageControls;
   const { createThinkCollapser } = globalThis.DsxThinkCollapse;
+  const { createSlashCommands } = globalThis.DsxSlashCommands;
 
   // dismissedUpdate is the release tag whose notice the user closed.
   const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '' };
@@ -606,6 +607,38 @@
   renderControls();
 
   thinkCollapser.start();
+
+  // ---- Slash commands --------------------------------------------------------------------------
+  // Placeholders for now: the menu, the filter, Tab and Enter all work, and each command only says
+  // it is not available yet. The real behaviour comes later, one command at a time.
+  const SLASH_COMMANDS = [
+    { name: 'help', description: 'Show the available commands' },
+    {
+      name: 'mode',
+      description: 'Switch between manual and bypass',
+      args: [
+        { value: 'manual', description: 'Ask before every command' },
+        { value: 'bypass', description: 'Run commands without asking' },
+      ],
+    },
+    { name: 'cd', description: 'Choose the working folder' },
+    {
+      name: 'thinking',
+      description: 'Keep the thinking blocks collapsed or not',
+      args: [
+        { value: 'collapse', description: 'Keep them collapsed' },
+        { value: 'default', description: 'Leave them as DeepSeek shows them' },
+      ],
+    },
+    { name: 'status', description: 'Show the connection, mode and folder' },
+    { name: 'update', description: 'Look for a new version now' },
+  ];
+
+  createSlashCommands({
+    commands: SLASH_COMMANDS,
+    run: (name) => ({ lines: [`/${name} is not available yet.`] }),
+    findBox: findComposerBox,
+  }).start();
 
   connect();
 

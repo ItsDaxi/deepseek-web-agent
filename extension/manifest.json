@@ -17,7 +17,7 @@
     },
     {
       "matches": ["https://chat.deepseek.com/*"],
-      "js": ["cards.js", "page-controls.js", "think-collapse.js", "content.js"],
+      "js": ["lib/slash-match.js", "cards.js", "page-controls.js", "think-collapse.js", "slash-commands.js", "content.js"],
       "css": ["page.css"],
       "run_at": "document_start"
     }
