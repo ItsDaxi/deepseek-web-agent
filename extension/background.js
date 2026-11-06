@@ -11,6 +11,12 @@ const MAX_DIAGNOSTICS = 30;
 const UPDATE_CHECK_EVERY_MS = 60 * 60 * 1000;
 const UPDATE_FETCH_TIMEOUT_MS = 8000;
 const MAX_ETAG_CHARS = 200;
+// How long the tabs get to say whether they can be reloaded, how long a reload remembers which tabs
+// to bring back, and how long before the same version may trigger another reload.
+const RELOAD_QUERY_TIMEOUT_MS = 1500;
+const RELOAD_RESUME_WINDOW_MS = 2 * 60 * 1000;
+const RELOAD_COOLDOWN_MS = 10 * 60 * 1000;
+const PAGE_ORIGIN_PREFIX = 'https://chat.deepseek.com/';
 
 const tabPorts = new Set();
 const jobOwners = new Map();
@@ -60,6 +66,7 @@ function connectHost() {
       hostError = null;
       logDiagnostic('host-connected', message.version);
       broadcast(hostStatus());
+      reloadIfFilesAreNewer(message.extensionVersion).catch(() => {});
       return;
     }
     const owner = jobOwners.get(message.id);
@@ -134,8 +141,93 @@ async function checkForUpdate() {
   return DsxUpdateCheck.status(chrome.runtime.getManifest().version, tag);
 }
 
+// ---- Reload after an update ----------------------------------------------------------------------
+// The setup replaces the extension's files, but the browser keeps running the old ones until the
+// extension is reloaded. The host reports the version of the files on disk when it connects. If that
+// is higher than the version running here, the extension reloads itself. Nothing is downloaded or
+// run: it only compares two version numbers.
+//
+// The DeepSeek tabs that are open lose their connection to a reloaded extension, so tabs with
+// nothing to lose are reloaded too. A tab with a draft, an unanswered card or a running command is
+// left alone, and shows its own "Reload page" notice.
+
+let reloadQuery = null;
+
+// Asks every connected tab whether it can be reloaded, and returns the ids of those that can.
+function askTabsWhichCanReload() {
+  return new Promise((resolve) => {
+    const waiting = new Set();
+    const safe = [];
+    let timer = null;
+    const finish = () => {
+      clearTimeout(timer);
+      reloadQuery = null;
+      resolve(safe);
+    };
+    reloadQuery = {
+      answer(port, busy) {
+        if (!waiting.delete(port)) return;
+        if (!busy) safe.push(port.sender.tab.id);
+        if (!waiting.size) finish();
+      },
+    };
+    for (const port of tabPorts) {
+      if (!port.sender || !port.sender.tab) continue;
+      waiting.add(port);
+      port.postMessage({ type: 'prepare-reload' });
+    }
+    timer = setTimeout(finish, RELOAD_QUERY_TIMEOUT_MS);
+    if (!waiting.size) finish();
+  });
+}
+
+async function reloadIfFilesAreNewer(versionOnDisk) {
+  const running = DsxUpdateCheck.parseVersion(chrome.runtime.getManifest().version);
+  const onDisk = DsxUpdateCheck.parseVersion(versionOnDisk);
+  if (!running || !onDisk || DsxUpdateCheck.compare(onDisk, running) <= 0) return;
+
+  // A reload that did not bring the two versions together is not repeated for ten minutes.
+  const { selfReload } = await chrome.storage.local.get({ selfReload: null });
+  if (selfReload && selfReload.version === versionOnDisk && Date.now() - selfReload.at < RELOAD_COOLDOWN_MS) return;
+
+  const tabIds = await askTabsWhichCanReload();
+  await chrome.storage.local.set({
+    selfReload: { version: versionOnDisk, at: Date.now() },
+    reloadTabs: { ids: tabIds, at: Date.now() },
+  });
+  logDiagnostic('reloading-for-update', versionOnDisk);
+  // The note is written before the worker is stopped, so it is still there afterwards.
+  await diagnosticsWrite;
+  chrome.runtime.reload();
+}
+
+// Runs each time this worker starts: right after a reload it brings back the tabs that were safe.
+async function reloadTabsAfterUpdate() {
+  const { reloadTabs } = await chrome.storage.local.get({ reloadTabs: null });
+  if (!reloadTabs) return;
+  await chrome.storage.local.remove('reloadTabs');
+  if (Date.now() - reloadTabs.at > RELOAD_RESUME_WINDOW_MS) return;
+  for (const id of reloadTabs.ids) {
+    try {
+      const tab = await chrome.tabs.get(id);
+      // The id may belong to another page by now.
+      if (tab.url && tab.url.startsWith(PAGE_ORIGIN_PREFIX)) await chrome.tabs.reload(id);
+    } catch {
+      // The tab was closed in the meantime.
+    }
+  }
+}
+
+reloadTabsAfterUpdate();
+// After a reload the worker does not start until something wakes it, and this is what does.
+chrome.runtime.onInstalled.addListener(() => { reloadTabsAfterUpdate(); });
+chrome.runtime.onStartup.addListener(() => { reloadTabsAfterUpdate(); });
+
 function handleTabMessage(port, message) {
   switch (message.type) {
+    case 'reload-state':
+      if (reloadQuery) reloadQuery.answer(port, message.busy !== false);
+      break;
     case 'check-update':
       checkForUpdate()
         .then((status) => port.postMessage({ type: 'update-status', ...status }))

@@ -118,6 +118,11 @@
 
   function handleBackgroundMessage(message) {
     switch (message.type) {
+      case 'prepare-reload':
+        // The extension is about to reload itself after an update. This page can follow it with a
+        // reload only if that loses nothing.
+        port.postMessage({ type: 'reload-state', busy: hasWorkInProgress() });
+        break;
       case 'update-status':
         updateInfo = message.available ? { tag: message.tag, url: message.url } : null;
         renderControls();
@@ -144,6 +149,15 @@
       default:
         break;
     }
+  }
+
+  // Something a reload of the page would lose: a call that is waiting, asking or running, a result
+  // that has not been sent yet, or text the user has typed in the composer.
+  function hasWorkInProgress() {
+    const pending = store.list().some((tool) => PENDING.has(tool.status));
+    const unsent = Boolean(turn && turn.results.length);
+    const draft = [...document.querySelectorAll('textarea')].some((area) => area.value.trim() !== '');
+    return pending || unsent || draft;
   }
 
   function appendOutput(id, data) {

@@ -48,6 +48,17 @@ function availableShells() {
   return candidates.filter((shell) => (shell === 'cmd' ? IS_WINDOWS : isOnPath(shell)));
 }
 
+// The version of the extension files next to this host, which is not always the version the browser
+// has loaded: right after an update the files are new and the browser still runs the old ones.
+function extensionVersion() {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'extension', 'manifest.json'), 'utf8'));
+    return typeof manifest.version === 'string' ? manifest.version : null;
+  } catch {
+    return null;
+  }
+}
+
 function defaultShell() {
   if (IS_WINDOWS) return 'powershell';
   const fromEnv = (process.env.SHELL || '').split('/').pop();
@@ -424,6 +435,7 @@ function handle(message) {
       send({
         type: 'hello',
         version: VERSION,
+        extensionVersion: extensionVersion(),
         platform: process.platform,
         defaultShell: defaultShell(),
         shells: availableShells(),

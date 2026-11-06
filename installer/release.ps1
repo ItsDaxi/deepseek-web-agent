@@ -91,7 +91,7 @@ try {
   Invoke-Checked 'The unit tests' { npm test --silent }
   if ($WithE2E) {
     Write-Step 'Running the end-to-end test'
-    Invoke-Checked 'The end-to-end test' { python -I test/e2e/run.py }
+    Invoke-Checked 'The end-to-end tests' { npm run test:e2e --silent }
   }
 
   Write-Step 'Building the setup'

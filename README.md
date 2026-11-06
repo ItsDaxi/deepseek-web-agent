@@ -56,7 +56,9 @@ The model chooses the timeout of each command, up to 600 seconds.
 
 ### Update notice
 
-When you open DeepSeek, the extension asks GitHub for the latest release of this repository. If it is newer than the installed version, a blue "Update available" pill appears at the top right, next to the status pill. Click it to open the release page on GitHub, download the new setup there and run it, then reload the extension in `brave://extensions`. Close it with the × and it stays closed until the next release.
+When you open DeepSeek, the extension asks GitHub for the latest release of this repository. If it is newer than the installed version, a blue "Update available" pill appears at the top right, next to the status pill. Click it to open the release page on GitHub, download the new setup there and run it. Close it with the × and it stays closed until the next release.
+
+After the setup runs, the extension notices that its files on disk are newer than the version the browser has loaded and reloads itself. It also reloads the DeepSeek tabs that have nothing to lose. A tab with text in the composer, a command in progress or a card waiting for your answer is left alone and shows `Reload page`, so you decide when. Nothing is downloaded or run for this: the extension only compares two version numbers. Updating from a version older than 0.2.1 needs one manual reload of the extension in `brave://extensions`.
 
 This is the only request the extension makes besides the ones to DeepSeek. It goes straight from your browser to `api.github.com`, carries no account and none of your data, and happens at most once an hour. Repeat requests ask GitHub only whether anything changed, which it answers without counting against its rate limit. GitHub sees your IP address, as with any visit. To turn it off, run `chrome.storage.local.set({ checkForUpdates: false })` in the extension's service worker console.
 
