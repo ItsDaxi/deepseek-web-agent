@@ -39,6 +39,10 @@
     .item:hover, .item[aria-selected="true"] { background-color: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, .08)); }
     .item .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .item .value { display: inline-flex; align-items: center; gap: 4px; color: var(--dsw-alias-label-tertiary, #adb2b8); }
+    .bar { height: 3px; margin: -4px 10px 8px; border-radius: 2px; background: var(--dsw-alias-border-l2, rgba(255, 255, 255, .12)); overflow: hidden; }
+    .bar i { display: block; height: 100%; border-radius: 2px; background: var(--dsw-alias-brand-text, #679efe); transition: width .3s ease; }
+    .bar.warn i { background: #e5a13a; }
+    .bar.full i { background: var(--dsw-alias-state-error-primary, #f25a5a); }
     .item.static { cursor: default; }
     .item.static:hover { background: none; }
     .item.disabled { cursor: not-allowed; }
@@ -224,6 +228,22 @@
       // The model is fixed: its row only shows it and cannot be opened.
       const modelRow = item('Model', { valueText: MODEL_NAME, nav: false });
       modelRow.classList.add('static');
+
+      // How much of the model's context window the open chat has used, as DeepSeek counts it.
+      const context = state.context || { used: 0, limit: null };
+      const format = root.DsxFormatTokens ? root.DsxFormatTokens.formatTokens : (value) => String(Math.round(value));
+      const known = context.limit > 0;
+      const ratio = known ? Math.min(context.used / context.limit, 1) : 0;
+      const contextRow = item('Context', {
+        valueText: known ? `${format(context.used)} / ${format(context.limit)}` : format(context.used),
+        title: known ? `${Math.round(context.used).toLocaleString('en-US')} of ${Math.round(context.limit).toLocaleString('en-US')} tokens` : '',
+        nav: false,
+      });
+      contextRow.classList.add('static');
+      const bar = el('div', `bar${ratio >= 0.95 ? ' full' : ratio >= 0.8 ? ' warn' : ''}`);
+      const fill = document.createElement('i');
+      fill.style.width = `${(ratio * 100).toFixed(1)}%`;
+      bar.append(fill);
       const effortRow = item('Effort', {
         action: 'effort-row', valueText: state.thinking ? 'On' : 'Off', chevron: true,
         pick: () => { active.view = 'effort'; active.selected = getState().thinking ? 1 : 2; render(); },
@@ -244,7 +264,7 @@
       teamwork.append(teamworkLabel, info, toggle);
       // The label dims on its own, not the (i), which has to stay readable for its tooltip.
 
-      panel.replaceChildren(modelRow, effortRow, teamwork);
+      panel.replaceChildren(modelRow, contextRow, ...(known ? [bar] : []), effortRow, teamwork);
     }
 
     function render() {

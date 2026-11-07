@@ -53,6 +53,7 @@ All controls sit in the composer of the DeepSeek page. The extension has no tool
 - The permission button (**Read Only**, **Workspace Write**, **Full access**) opens a menu of presets. A short pixel wave crosses the composer when you change it: white, or red and flickering while Evil Mode is on, whatever the preset.
 - The model button opens a small panel. The model is fixed. **Effort** is on or off and works exactly like DeepSeek's DeepThink button, which the extension hides and drives for you. Search is always on, and its button is hidden too. "Enable agent teamwork" is not built yet and cannot be clicked.
 - "Thought for N seconds" blocks are kept collapsed. Click one to read it, and it stays open. To stop this, run `chrome.storage.local.set({ collapseThinking: false })` in the extension's service worker console.
+- The model panel (click the model name above the send button) has a Context row: the tokens the chat has used against the model's limit, like `212K / 1M`, with a thin bar that turns amber and then red as it fills. It updates at the end of every reply, with the total DeepSeek counts.
 - Each thinking block shows how many tokens the model spent reasoning, counted live as it streams (`1.2K tokens`). DeepSeek sends the reasoning one token per chunk, so the count is exact; blocks from an earlier visit show none.
 
 The model chooses the timeout of each command, up to 600 seconds.
@@ -135,13 +136,13 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | --- | --- |
 | `extension/lib/protocol.js` | The hidden prompt, the tool syntax and the format of result messages |
 | `extension/lib/stream-filter.js` | Removes tool syntax from the response stream and from the history |
-| `extension/lib/context-usage.js` | Reads the token total DeepSeek counts for a chat, and the model's token limit, for the context meter |
+| `extension/lib/context-usage.js` | Reads the token total DeepSeek counts for a chat, and the model's token limit, for the Context row of the model panel |
 | `extension/page-hook.js` | Wraps `XMLHttpRequest` and sends results through the page's own composer |
 | `extension/content.js` | Approval decisions, the life of each command, and changes to the page |
 | `extension/cards.js` | Draws the tool cards |
 | `extension/evil-awakening.js` | The animation played when `/evil` is turned on |
 | `extension/evil-greeting.js` | The tougher greetings on an empty chat while `/evil` is on |
-| `extension/page-controls.js` | The status pill, the composer buttons, the context meter, tooltips and the mode animation |
+| `extension/page-controls.js` | The status pill, the composer buttons, tooltips and the mode animation |
 | `extension/menus.js` | The workspace, permission and model menus |
 | `extension/think-collapse.js` | Keeps the thinking blocks collapsed |
 | `extension/think-tokens.js` | Shows the reasoning token count in each thinking block |

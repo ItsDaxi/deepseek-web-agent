@@ -451,6 +451,16 @@ def run(context, server):
     check("a small count is shown as it is, and the earlier block keeps its own", wait_until(lambda: badges()[-2:] == ["· 1.2K tokens", "· 7 tokens"], message="7 badge"), str(badges()))
     wait_until(lambda: not page.evaluate("document.querySelector('#composer')?.hasAttribute('data-dsx-sending')"), message="composer free")
 
+    # The model panel also shows how much of the context window the chat has used.
+    page.evaluate("(id) => { window.postMessage({source:'dsx-page', type:'context-limit', tokens: 1000000}, location.origin); window.postMessage({source:'dsx-page', type:'usage', sessionId: id, tokens: 212000}, location.origin); }", SESSION_ID)
+    pause(0.5)
+    shadow.click_last("model-menu")
+    check("the model panel shows the context used against the limit", wait_until(lambda: "Context" in shadow.text() and "212K / 1M" in shadow.text(), message="context row"), shadow.text()[-200:])
+    if SCREENSHOTS:
+        page.screenshot(path=str(SCREENSHOTS / "9-context-in-model-panel.png"))
+    page.keyboard.press("Escape")
+    wait_until(lambda: not shadow.actions("effort-row"), message="model panel closed")
+
     # A reply with two calls: the first one finishes while the model is still writing the second.
     # Both results belong to the same reply, so they go back together once the reply has ended.
     def post_event(event):
