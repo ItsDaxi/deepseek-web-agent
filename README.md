@@ -53,6 +53,7 @@ All controls sit in the composer of the DeepSeek page. The extension has no tool
 - The permission button (**Read Only**, **Workspace Write**, **Full access**) opens a menu of presets. A short pixel wave crosses the composer when you change it: white, or red and flickering while Evil Mode is on, whatever the preset.
 - The model button opens a small panel. The model is fixed. **Effort** is on or off and works exactly like DeepSeek's DeepThink button, which the extension hides and drives for you. Search is always on, and its button is hidden too. "Enable agent teamwork" is not built yet and cannot be clicked.
 - "Thought for N seconds" blocks are kept collapsed. Click one to read it, and it stays open. To stop this, run `chrome.storage.local.set({ collapseThinking: false })` in the extension's service worker console.
+- Each thinking block shows how many tokens the model spent reasoning, counted live as it streams (`1.2K tokens`). DeepSeek sends the reasoning one token per chunk, so the count is exact; blocks from an earlier visit show none.
 
 The model chooses the timeout of each command, up to 600 seconds.
 
@@ -143,6 +144,7 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/page-controls.js` | The status pill, the composer buttons, the context meter, tooltips and the mode animation |
 | `extension/menus.js` | The workspace, permission and model menus |
 | `extension/think-collapse.js` | Keeps the thinking blocks collapsed |
+| `extension/think-tokens.js` | Shows the reasoning token count in each thinking block |
 | `extension/background.js` | Connects tabs to the native host |
 | `host/host.js` | Runs commands and tools, streams output, enforces timeouts and kills |
 | `host/tools.js` | The `read`, `write`, `edit`, `glob` and `grep` tools |

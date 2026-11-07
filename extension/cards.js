@@ -47,8 +47,8 @@
     .meta { display: flex; flex: none; align-items: center; gap: 8px; font-size: 12px; color: var(--dsw-alias-label-caption, #81858c); }
     svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     pre { margin: 0; padding: 10px 12px; font: 12.5px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; border-top: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.06)); }
-    pre.output { color: var(--dsw-alias-label-tertiary, #adb2b8); max-height: 320px; overflow-y: auto; }
-    pre.diff, pre.content { max-height: 320px; overflow-y: auto; }
+    pre.output { color: var(--dsw-alias-label-tertiary, #adb2b8); max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
+    pre.diff, pre.content { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
     .del, .add { display: block; }
     .del { color: var(--dsw-alias-state-error-primary, #f25a5a); }
     .add { color: var(--dsw-alias-state-success-primary, #22c55e); }
@@ -212,7 +212,7 @@
         'div',
         { className: 'card' },
         el('div', { className: 'head' }, icon('spinner', 'spin brand'), el('span', { className: 'title', text: isShell ? 'Writing command…' : `${toolInfo(tool).verb} ${tool.path}…`.replace(/ …$/, '…') })),
-        (isShell || tool.kind === 'write') && tool.command ? el('pre', { className: 'content', text: tool.command }) : null,
+        (isShell || tool.kind === 'write') && tool.command ? el('pre', { className: 'content', text: tool.command, dataset: { follow: '1' } }) : null,
       );
     }
 
@@ -374,14 +374,25 @@
       }
     }
 
+    // Every scrollable box in a card, in the order they are drawn.
+    const SCROLLERS = 'pre.output, pre.content, pre.diff';
+
+    // The card is rebuilt whenever it changes, and a rebuilt box starts at its top. While a file is
+    // being written that happened on every token, so the box could never be scrolled. Each box keeps
+    // the place it was left at, and one that was at the end keeps following the end.
     function paint(id, shadow) {
-      const scroller = shadow.querySelector('[data-live]');
-      const atBottom = scroller ? scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24 : true;
-      const previous = scroller ? scroller.scrollTop : 0;
+      const before = [...shadow.querySelectorAll(SCROLLERS)].map((box) => ({
+        atBottom: box.scrollHeight - box.scrollTop - box.clientHeight < 24,
+        top: box.scrollTop,
+      }));
       shadow.querySelector('.card')?.remove();
       shadow.append(render(tools.get(id)));
-      const next = shadow.querySelector('[data-live]');
-      if (next) next.scrollTop = atBottom ? next.scrollHeight : previous;
+      shadow.querySelectorAll(SCROLLERS).forEach((box, index) => {
+        const was = before[index];
+        // A box seen for the first time shows its end while it is still being filled.
+        const follow = was ? was.atBottom : box.hasAttribute('data-live') || box.dataset.follow === '1';
+        box.scrollTop = follow ? box.scrollHeight : (was ? was.top : 0);
+      });
     }
 
     // What a card visibly depends on. Rebuilding only when this changes keeps buttons in place: a
@@ -393,7 +404,9 @@
         tool.status,
         tool.kind,
         tool.path,
-        tool.command,
+        // While a call is being written its text grows by the token. That is added in place (see
+        // syncWriting), because rebuilding the card under the mouse breaks scrolling it.
+        tool.status === 'writing' ? Boolean(tool.command) : tool.command,
         tool.code,
         tool.durationMs,
         tool.expanded,
@@ -409,12 +422,30 @@
       ]);
     }
 
+    // Adds the newly written text to the box that is already on screen, leaving the scroll alone
+    // unless the box was showing its end.
+    function syncWriting(tool, shadow) {
+      const box = shadow.querySelector('pre.content');
+      const text = tool.command || '';
+      if (!box || box.textContent === text) return;
+      const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+      const top = box.scrollTop;
+      const shown = box.textContent;
+      if (box.firstChild && text.startsWith(shown)) box.firstChild.appendData(text.slice(shown.length));
+      else box.textContent = text;
+      box.scrollTop = atBottom ? box.scrollHeight : top;
+    }
+
     function refresh(id) {
-      const key = renderKey(tools.get(id));
+      const tool = tools.get(id);
+      const key = renderKey(tool);
       for (const entry of hosts.get(id) || []) {
-        if (entry.host.isConnected && entry.key !== key) {
+        if (!entry.host.isConnected) continue;
+        if (entry.key !== key) {
           paint(id, entry.shadow);
           entry.key = key;
+        } else if (tool && tool.status === 'writing') {
+          syncWriting(tool, entry.shadow);
         }
       }
       updateTicker();

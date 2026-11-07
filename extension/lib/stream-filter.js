@@ -157,6 +157,11 @@
     let fragmentType = null;
     let toolCalled = false;
     let finished = false;
+    // DeepSeek streams the reasoning one token per chunk, so counting chunks counts tokens. Checked
+    // against the model's own tokenizer: every chunk of a recorded reply was exactly one token. A
+    // replayed stream sends its text in big pieces, so what it counts is marked as not exact.
+    let thinkTokens = 0;
+    let thinkOpen = false;
 
     function nextId() {
       callCount += 1;
@@ -177,7 +182,25 @@
       });
     }
 
+    function reportThink(done) {
+      if (thinkTokens === 0) return;
+      onEvent({ type: 'think-tokens', sessionId, messageId, tokens: thinkTokens, exact: live, done });
+    }
+
+    function endThink() {
+      if (!thinkOpen) return;
+      thinkOpen = false;
+      reportThink(true);
+    }
+
+    function countThinkToken() {
+      thinkOpen = true;
+      thinkTokens += 1;
+      reportThink(false);
+    }
+
     function beginFragment(type) {
+      if (fragmentType === 'THINK' && type !== 'THINK') endThink();
       fragmentType = type;
       if (type === 'THINK') {
         scanner = createToolScanner({ mode: 'strip' });
@@ -199,6 +222,7 @@
     function rewriteFragments(fragments) {
       fragments.forEach((fragment, index) => {
         beginFragment(fragment.type);
+        if (fragment.type === 'THINK' && typeof fragment.content === 'string' && fragment.content !== '') countThinkToken();
         if (scanner && typeof fragment.content === 'string') {
           let content = scanner.push(fragment.content);
           if (index < fragments.length - 1) content += scanner.flush();
@@ -229,11 +253,13 @@
       }
 
       if (path === 'response/status' || (path === 'response' && patch.o === 'BATCH')) {
+        endThink();
         reportUsage(patch);
         return `${flushFragment()}${line}\n`;
       }
 
       if (isContentPath(path) && typeof patch.v === 'string' && patch.o !== 'SET' && scanner) {
+        if (fragmentType === 'THINK' && patch.v !== '') countThinkToken();
         const text = scanner.push(patch.v);
         if (text === '' && patch.p === undefined) {
           skipBlankLine = true;
@@ -305,6 +331,7 @@
         finished = true;
         const rest = partialLine ? rewriteLine(partialLine) : '';
         partialLine = '';
+        endThink();
         return rest + flushFragment();
       },
     };

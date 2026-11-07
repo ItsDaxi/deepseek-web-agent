@@ -635,7 +635,7 @@
     // `used` and `limit` are tokens, as DeepSeek counts them. A limit of null shows the count alone.
     function setContext({ used, limit }) {
       // A cosmetic meter must never stop the other controls: without the library it shows plain numbers.
-      const formatTokens = root.DsxContextUsage ? root.DsxContextUsage.formatTokens : (value) => String(Math.round(value));
+      const formatTokens = root.DsxFormatTokens ? root.DsxFormatTokens.formatTokens : (value) => String(Math.round(value));
       const count = Math.max(0, Number(used) || 0);
       const known = Number.isFinite(limit) && limit > 0;
       const ratio = known ? Math.min(count / limit, 1) : 0;

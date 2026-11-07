@@ -111,15 +111,22 @@
         const item = row(key, 'assistant');
         const message = document.createElement('div');
         message.className = 'ds-message';
+        // The real page wraps its thinking in a collapsible block whose header is its first child.
+        const block = document.createElement('div');
+        block.style.setProperty('--collapsible-area-title-height', '36px');
+        const header = document.createElement('div');
+        header.textContent = 'Thought';
         const think = document.createElement('div');
         think.className = 'ds-think-content';
+        block.append(header, think);
         const markdown = document.createElement('div');
         markdown.className = 'ds-markdown ds-assistant-message-main-content';
-        message.append(think, markdown);
+        message.append(block, markdown);
         item.append(message);
         return (fragments) => {
           think.textContent = fragments.filter((f) => f.type === 'THINK').map((f) => f.content).join('');
           think.hidden = !think.textContent;
+          block.hidden = !think.textContent;
           renderMarkdown(markdown, fragments.filter((f) => f.type === 'RESPONSE').map((f) => f.content).join(''));
         };
       }
@@ -173,8 +180,18 @@
         event.preventDefault();
         const text = composer.value.trim();
         if (!text || busy) return;
-        composer.value = '';
-        send(text);
+        // The real page solves a proof of work first: the composer keeps its text, and nothing leaves,
+        // until that is done. Every Enter in that time starts a send of its own.
+        const pow = window.__powMs || 0;
+        if (!pow) {
+          composer.value = '';
+          send(text);
+          return;
+        }
+        setTimeout(() => {
+          if (composer.value.trim() === text) composer.value = '';
+          send(text);
+        }, pow);
       });
 
       const history = new XMLHttpRequest();

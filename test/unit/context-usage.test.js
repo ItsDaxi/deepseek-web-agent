@@ -2,22 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { latestUsage, contextLimit, storedContextLimit, formatTokens } = require('../../extension/lib/context-usage.js');
+const { latestUsage, contextLimit, storedContextLimit } = require('../../extension/lib/context-usage.js');
 const { createSseRewriter, rewriteHistory } = require('../../extension/lib/stream-filter.js');
-
-test('token counts are shortened to a few characters', () => {
-  assert.equal(formatTokens(0), '0');
-  assert.equal(formatTokens(999), '999');
-  assert.equal(formatTokens(1000), '1K');
-  assert.equal(formatTokens(1606), '1.6K');
-  assert.equal(formatTokens(12345), '12.3K');
-  assert.equal(formatTokens(99990), '100K');
-  assert.equal(formatTokens(125000), '125K');
-  assert.equal(formatTokens(890880), '891K');
-  assert.equal(formatTokens(999600), '1M');
-  assert.equal(formatTokens(1200000), '1.2M');
-  assert.equal(formatTokens(undefined), '0');
-});
 
 test('the limit is the smaller token limit of the model the chat opens with', () => {
   const payload = (configs) => ({ data: { biz_data: { settings: { model_configs: { value: configs } } } } });

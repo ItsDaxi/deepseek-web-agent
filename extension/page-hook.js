@@ -23,7 +23,8 @@
   const LEAKED_TITLE = /\b(dsx|shell tool|tool syntax|system prompt)\b/i;
   const SEND_RETRY_MS = 250;
   const COMPOSER_POLL_MS = 15;
-  const SEND_TIMEOUT_MS = 15000;
+  const SEND_TIMEOUT_MS = 40000;
+  const ACCEPT_WAIT_MS = 8000;
   const ENTER_ATTEMPTS = 3;
   const TITLE_MAX_CHARS = 40;
 
@@ -317,12 +318,20 @@
         if (attempt < ENTER_ATTEMPTS) pressEnter(area);
         else clickSendButton(area);
         attempt += 1;
-        for (let waited = 0; waited < SEND_RETRY_MS && area.value === marker; waited += COMPOSER_POLL_MS) {
+        // The page can spend seconds on its proof of work before the request leaves, with the marker
+        // still in the composer. Pressing Enter again in that time sent the bare marker as a second
+        // message, and the model answered it with "nothing new", once per extra press. So one press
+        // gets a long wait, and only a request that never started is tried again.
+        for (
+          let waited = 0;
+          waited < ACCEPT_WAIT_MS && area.value === marker && pendingResults.has(entry.key) && activeStreams === 0;
+          waited += COMPOSER_POLL_MS
+        ) {
           await delay(COMPOSER_POLL_MS);
         }
-        // The page solves a proof of work before its request leaves, so an emptied composer is
-        // what proves the send was accepted. Sending again here would post the result twice.
-        accepted = area.value !== marker || !pendingResults.has(entry.key);
+        // An emptied composer, a request that left, or a reply that started all prove the send was
+        // accepted. Sending again here would post the result twice.
+        accepted = area.value !== marker || !pendingResults.has(entry.key) || activeStreams > 0;
         setComposerValue(area, draft);
         area.removeAttribute('data-dsx-sending');
       } else {

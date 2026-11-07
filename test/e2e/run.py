@@ -61,7 +61,11 @@ def check(name, condition, detail=""):
         failures.append(name)
 
 
-def sse(message_id, text):
+# Replies whose reasoning streams as this many one-token chunks, like the real thing.
+THINK_CHUNKS = {"think hard": 1234, "think briefly": 7}
+
+
+def sse(message_id, text, think_chunks=1):
     tokens = [text[i : i + 7] for i in range(0, len(text), 7)] or [""]
     lines = [
         "event: ready",
@@ -69,6 +73,11 @@ def sse(message_id, text):
         "",
         "data: " + json.dumps({"v": {"response": {"message_id": message_id, "status": "WIP", "fragments": [{"id": 1, "type": "THINK", "content": "Thinking."}]}}}),
         "",
+    ]
+    for index in range(think_chunks - 1):
+        patch = {"p": "response/fragments/-1/content", "o": "APPEND", "v": " t"} if index == 0 else {"v": " t"}
+        lines += ["data: " + json.dumps(patch), ""]
+    lines += [
         "data: " + json.dumps({"p": "response/fragments/-1/elapsed_secs", "o": "SET", "v": 0.5}),
         "",
         "data: " + json.dumps({"p": "response/fragments", "o": "APPEND", "v": [{"id": 2, "type": "RESPONSE", "content": tokens[0]}]}),
@@ -114,7 +123,8 @@ class MockServer:
             self.next_id += 2
             self.messages.append({"message_id": user_id, "role": "USER", "fragments": [{"type": "REQUEST", "content": body["prompt"]}]})
             self.messages.append({"message_id": reply_id, "role": "ASSISTANT", "fragments": [{"type": "THINK", "content": "Thinking."}, {"type": "RESPONSE", "content": reply}]})
-            route.fulfill(status=200, headers={"content-type": "text/event-stream; charset=utf-8"}, body=sse(reply_id, reply))
+            chunks = next((count for key, count in THINK_CHUNKS.items() if key in body["prompt"]), 1)
+            route.fulfill(status=200, headers={"content-type": "text/event-stream; charset=utf-8"}, body=sse(reply_id, reply, chunks))
         elif path == "/api/v0/chat/history_messages":
             self.history_urls.append(request.url)
             payload = {"data": {"biz_code": 0, "biz_data": {"chat_session": {"id": SESSION_ID}, "chat_messages": self.messages, "cache_control": "REPLACE"}}}
@@ -228,6 +238,8 @@ def run(context, server):
     active_page[0] = page
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
+    if os.environ.get("DSX_DEBUG"):
+        page.on("console", lambda message: print("PAGE", message.type, message.text[:300]))
     context.route("https://chat.deepseek.com/**", server.handle)
     page.goto(CHAT_URL)
     shadow = Shadow(page, context)
@@ -416,6 +428,48 @@ def run(context, server):
     wait_until(lambda: "Finished" in visible_text(page), message="bypass answer")
     if SCREENSHOTS:
         page.screenshot(path=str(SCREENSHOTS / "6-bypass.png"))
+
+    # The real page keeps the text in the composer for seconds while it solves a proof of work. A result
+    # must still go out once: a second press in that time would send the bare marker to the model.
+    page.evaluate("window.__powMs = 1800")
+    count = len(server.requests)
+    type_message(page, "bypass run")
+    wait_until(lambda: len(server.requests) >= count + 2, message="result sent after a slow proof of work")
+    pause(6)
+    sent = server.requests[count:]
+    bare = [request["prompt"] for request in sent if "dsx-result:" in request["prompt"] and "<dsx:result " not in request["prompt"]]
+    check("a slow proof of work still sends the result exactly once", len(sent) == 2 and not bare, f"{len(sent)} requests, bare markers: {len(bare)}")
+    page.evaluate("window.__powMs = 0")
+
+    # The reasoning is counted as it streams, one token per chunk, and large counts get a K.
+    def badges():
+        return page.evaluate("[...document.querySelectorAll('[data-dsx-tokens]')].map((node) => node.textContent)")
+
+    type_message(page, "think hard")
+    check("the reasoning counter shows thousands with a K", wait_until(lambda: badges()[-1:] == ["· 1.2K tokens"], message="1.2K badge"), str(badges()))
+    type_message(page, "think briefly")
+    check("a small count is shown as it is, and the earlier block keeps its own", wait_until(lambda: badges()[-2:] == ["· 1.2K tokens", "· 7 tokens"], message="7 badge"), str(badges()))
+    wait_until(lambda: not page.evaluate("document.querySelector('#composer')?.hasAttribute('data-dsx-sending')"), message="composer free")
+
+    # A reply with two calls: the first one finishes while the model is still writing the second.
+    # Both results belong to the same reply, so they go back together once the reply has ended.
+    def post_event(event):
+        page.evaluate("(event) => window.postMessage({source:'dsx-page', ...event}, location.origin)", event)
+
+    first_file = WORKDIR / "two-calls.txt"
+    first_file.unlink(missing_ok=True)
+    count = len(server.requests)
+    post_event({"type": "tool-call", "id": "two-1", "tool": "write", "sessionId": SESSION_ID, "command": "one", "attributes": {"path": str(first_file)}, "live": True})
+    wait_until(lambda: first_file.exists(), message="first call ran while the reply was still going")
+    pause(1.5)
+    post_event({"type": "tool-call", "id": "two-2", "tool": "shell", "sessionId": SESSION_ID, "command": "echo two-calls-second", "attributes": {}, "live": True})
+    pause(1.5)
+    check("nothing goes back while the reply is still being written", len(server.requests) == count)
+    post_event({"type": "stream-end", "sessionId": SESSION_ID})
+    wait_until(lambda: len(server.requests) > count, message="results sent after the reply ended")
+    pause(3)
+    sent = server.requests[count:]
+    check("two calls of one reply come back in one message", len(sent) == 1 and "two-calls-second" in sent[0]["prompt"] and 'id="two-1"' in sent[0]["prompt"], f"{len(sent)} requests")
 
     # A replayed stream never auto-runs, even in bypass mode.
     page.evaluate(

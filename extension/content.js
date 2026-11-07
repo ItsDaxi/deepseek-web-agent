@@ -6,6 +6,7 @@
   const { createCardStore } = globalThis.DsxCards;
   const { createPageControls, findComposerBox } = globalThis.DsxPageControls;
   const { createThinkCollapser } = globalThis.DsxThinkCollapse;
+  const { createThinkCounter } = globalThis.DsxThinkTokens;
   const { createSlashCommands } = globalThis.DsxSlashCommands;
   const { modeLabel } = globalThis.DsxMenus;
 
@@ -59,6 +60,7 @@
 
   const store = createCardStore({ onAction: handleAction });
   // DeepSeek has no setting to keep its "Thought for N seconds" blocks collapsed, so the extension does it.
+  const thinkCounter = createThinkCounter({ format: globalThis.DsxFormatTokens.formatTokens });
   const thinkCollapser = createThinkCollapser({ enabled: () => settings.collapseThinking !== false });
 
   // ---- Settings and page configuration -------------------------------------------------------
@@ -360,9 +362,13 @@
     runCommand(id, { autoRun: true });
   }
 
-  // Sends the whole reply back at once, as soon as every call in it is done.
+  // Sends the whole reply back at once, once the reply has ended and every call in it is done.
+  // Until the reply has ended the model may still be writing another call, so a call that finishes
+  // early cannot tell whether it is the last: sending then split one reply into several messages,
+  // and the model answered each of them.
   function flushTurn() {
     const active = currentTurn();
+    if (!active.closed) return;
     if (!active.results.length) return;
     if (active.ids.some((id) => store.get(id) && PENDING.has(store.get(id).status))) return;
     const { results } = active;
@@ -619,7 +625,12 @@
       case 'stream-end':
         // Nothing more arrives for this reply. The calls still queued behind one another stay
         // queued and keep going in order; only the reply itself is closed to new calls.
-        if (turn) turn.closed = true;
+        if (turn) {
+          turn.closed = true;
+          // Calls that finished while the reply was still coming in were waiting for this.
+          nextInTurn();
+          flushTurn();
+        }
         break;
       case 'history':
         applyHistory(message);
@@ -627,6 +638,9 @@
           chatTokens.set(message.sessionId, message.tokens);
           renderContext();
         }
+        break;
+      case 'think-tokens':
+        thinkCounter.update(message);
         break;
       case 'usage':
         chatTokens.set(message.sessionId, message.tokens);
@@ -646,8 +660,18 @@
 
   // ---- DOM decoration ------------------------------------------------------------------------
 
-  function decorateCodeBlocks() {
-    for (const pre of document.querySelectorAll('pre')) {
+  // The blocks inside `root` (the whole page when it is left out), plus the one that holds it.
+  function blocksIn(root) {
+    if (!root) return document.querySelectorAll('pre');
+    const found = new Set(root.querySelectorAll ? root.querySelectorAll('pre') : []);
+    const holder = root.closest ? root.closest('pre') : null;
+    if (holder) found.add(holder);
+    if (root.matches && root.matches('pre')) found.add(root);
+    return found;
+  }
+
+  function decorateCodeBlocks(root) {
+    for (const pre of blocksIn(root)) {
       const text = (pre.textContent || '').trim();
       if (!text.startsWith(SENTINEL_PREFIX)) continue;
       const id = text.slice(SENTINEL_PREFIX.length);
@@ -662,8 +686,18 @@
     }
   }
 
-  function hideResultMessages() {
-    for (const message of document.querySelectorAll('.ds-message, [data-virtual-list-item-key]')) {
+  const MESSAGE_SELECTOR = '.ds-message, [data-virtual-list-item-key]';
+
+  function hideResultMessages(root) {
+    let messages = document.querySelectorAll(MESSAGE_SELECTOR);
+    if (root) {
+      const near = new Set(root.querySelectorAll ? root.querySelectorAll(MESSAGE_SELECTOR) : []);
+      const holder = root.closest ? root.closest(MESSAGE_SELECTOR) : null;
+      if (holder) near.add(holder);
+      if (root.matches && root.matches(MESSAGE_SELECTOR)) near.add(root);
+      messages = near;
+    }
+    for (const message of messages) {
       if (message.classList.contains('dsx-hidden') || !RESULT_MARKER.test(message.textContent || '')) continue;
       // Hide the whole list row (with its edit and copy buttons) when it holds only this message.
       const row = message.closest('[data-virtual-list-item-key]');
@@ -673,12 +707,35 @@
   }
 
   // Mutation callbacks run before the next paint, so raw markers are never drawn.
-  new MutationObserver(() => {
-    decorateCodeBlocks();
-    hideResultMessages();
+  // A token streaming into a long chat touches one small node, so only what changed is looked at.
+  // Going over every block and message of the page on each mutation made scrolling stutter, because
+  // the page's own list changes the DOM all the way while it is scrolled.
+  new MutationObserver((records) => {
+    const roots = new Set();
+    for (const record of records) {
+      const nodes = record.type === 'childList' ? record.addedNodes : [record.target];
+      for (const node of nodes) {
+        const element = node.nodeType === 1 ? node : node.parentElement;
+        if (element) roots.add(element);
+      }
+    }
+    for (const root of roots) {
+      decorateCodeBlocks(root);
+      hideResultMessages(root);
+    }
     controls.mount();
     renderContext();
+    thinkCounter.schedule();
   }).observe(document, { childList: true, subtree: true, characterData: true });
+
+  // A full pass now and then catches anything the targeted ones could not tie to a changed node.
+  const FULL_SCAN_MS = 1500;
+  decorateCodeBlocks();
+  hideResultMessages();
+  setInterval(() => {
+    decorateCodeBlocks();
+    hideResultMessages();
+  }, FULL_SCAN_MS);
 
   // The meter shows the chat that is open. A new chat has no id in its address yet, so it shows 0.
   function renderContext() {

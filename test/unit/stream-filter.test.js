@@ -410,3 +410,31 @@ test('long output keeps its head and tail for the model', () => {
   assert.ok(text.startsWith('HEAD') && text.endsWith('TAIL'));
   assert.ok(text.length < 21000);
 });
+
+test('the reasoning is counted one token per streamed chunk, and ends with the status', () => {
+  const events = [];
+  const rewriter = createSseRewriter({ sessionId: 's', live: true, onEvent: (event) => events.push(event) });
+  const data = (value) => `data: ${JSON.stringify(value)}\n\n`;
+  rewriter.feed('event: ready\ndata: {"request_message_id":1,"response_message_id":2}\n\n');
+  rewriter.feed(data({ v: { response: { message_id: 2, status: 'WIP', fragments: [{ id: 2, type: 'THINK', content: 'The' }] } } }));
+  rewriter.feed(data({ p: 'response/fragments/-1/content', o: 'APPEND', v: ' user' }));
+  rewriter.feed(data({ v: ' says' }));
+  rewriter.feed(data({ p: 'response/fragments', o: 'APPEND', v: [{ id: 3, type: 'RESPONSE', content: 'Hi' }] }));
+  rewriter.feed(data({ p: 'response/fragments/-1/content', v: ' there' }));
+  rewriter.feed(data({ p: 'response/status', o: 'SET', v: 'FINISHED' }));
+  rewriter.end();
+
+  const counts = events.filter((event) => event.type === 'think-tokens');
+  assert.deepEqual(counts.map((event) => event.tokens), [1, 2, 3, 3]);
+  assert.deepEqual(counts.map((event) => event.done), [false, false, false, true]);
+  assert.ok(counts.every((event) => event.exact && event.messageId === 2));
+});
+
+test('a replayed stream is counted but not trusted', () => {
+  const events = [];
+  const rewriter = createSseRewriter({ sessionId: 's', live: false, onEvent: (event) => events.push(event) });
+  rewriter.feed(`data: ${JSON.stringify({ v: { response: { message_id: 2, status: 'WIP', fragments: [{ id: 2, type: 'THINK', content: 'a long replayed paragraph' }] } } })}\n\n`);
+  rewriter.feed(`data: ${JSON.stringify({ p: 'response/status', o: 'SET', v: 'FINISHED' })}\n\n`);
+  const counts = events.filter((event) => event.type === 'think-tokens');
+  assert.ok(counts.length > 0 && counts.every((event) => event.exact === false));
+});

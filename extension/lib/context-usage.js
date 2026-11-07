@@ -49,20 +49,7 @@
     return limitFromConfigs(state && state.entries && state.entries.model_configs && state.entries.model_configs.value);
   }
 
-  function trimZero(text) {
-    return text.replace(/\.0$/, '');
-  }
-
-  // 999 -> "999", 1606 -> "1.6K", 125000 -> "125K", 890880 -> "891K", 1200000 -> "1.2M".
-  function formatTokens(count) {
-    const value = Math.max(0, Math.round(Number(count) || 0));
-    if (value < 1000) return String(value);
-    if (value < 100000) return `${trimZero((value / 1000).toFixed(1))}K`;
-    if (value < 999500) return `${Math.round(value / 1000)}K`;
-    return `${trimZero((value / 1000000).toFixed(1))}M`;
-  }
-
-  const api = { latestUsage, contextLimit, storedContextLimit, formatTokens };
+  const api = { latestUsage, contextLimit, storedContextLimit };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.DsxContextUsage = api;
