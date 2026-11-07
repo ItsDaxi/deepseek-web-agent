@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DeepSeek Web Agent",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Gives the DeepSeek web chat tools to read and edit files and run commands on your computer.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoOvnubT0vniwv+i+wEv4oFeC6EuOGN83nvMIZmglkgmgN2hES7HytMeQiUxdCmcILCn8EHKtNidmcga1EIcY26VMqSO54DO48WkNehKFsgpXqAuEH2HNLUvlOEwEowbjuJKtxzmppxHlc+HcxHso1Wggr9igyu+x2LqfML1HQiVSU50rQmxvMCkUuQJxtUhmUBC8bLLkuyJk/FmM/YZ4SfGrufqRAnsdtFaaZfd85qcJqBX7Q3Q7AdDVYIyMuf/z2A+6rjbZ7YKIbQYdtQbJjm+x6Y1EQg2QzDXV4XAKa0wc5bTQGKECGOy3ZI9DrkeZ9L9AoUldaekVDBzdbgUOJwIDAQAB",
   "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
