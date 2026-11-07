@@ -86,3 +86,16 @@ test('words after a command that takes no argument are a message', () => {
   assert.equal(plan(commands, '/status now'), null);
   assert.equal(plan(commands, '/nothing here'), null);
 });
+
+test('commands with a group are kept together, in the order of their groups', () => {
+  const grouped = [
+    { name: 'file', group: 'Add', description: '' },
+    { name: 'permission', group: 'Commands', description: 'Presets' },
+    { name: 'plan', group: 'Add', description: 'Plan mode' },
+    { name: 'export', group: 'Commands', description: 'Download' },
+  ];
+  assert.deepEqual(plan(grouped, '/').items.map((item) => item.name), ['file', 'plan', 'permission', 'export']);
+  // "p" starts permission and plan and is inside export. The best match leads, and each group stays whole.
+  assert.deepEqual(plan(grouped, '/p').items.map((item) => item.name), ['permission', 'export', 'plan']);
+  assert.equal(plan(grouped, '/perm').selected.name, 'permission');
+});

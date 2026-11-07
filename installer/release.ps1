@@ -117,7 +117,7 @@ try {
     '',
     'The setup is not signed, so SmartScreen may warn you. Choose More info, then Run anyway, if you trust where you got it. You can check the download against this SHA-256:',
     '', "$tick$hash$tick", '',
-    "This is unofficial and not affiliated with DeepSeek. It depends on the site's private web API, so a DeepSeek update can break it. Read the Security section of the README before you use Bypass mode.",
+    "This is unofficial and not affiliated with DeepSeek. It depends on the site's private web API, so a DeepSeek update can break it. Read the Security section of the README before you use Full access.",
     '', 'On macOS and Linux, install from source as described in the README.'
   ) -join "`n"
   $notesPath = Join-Path $env:TEMP "dsx-release-notes-$Version.md"

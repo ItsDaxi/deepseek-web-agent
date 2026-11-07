@@ -1,0 +1,354 @@
+// The pop-up menus of the composer: the workspace list, the permission presets and the model panel.
+// They are drawn in DeepSeek's own dropdown style (the same tokens as slash-commands.js), inside a
+// closed shadow root, and only react to real clicks and key presses, so a page script cannot change
+// the permission mode by faking one.
+(function (root) {
+  'use strict';
+
+  const MODEL_NAME = 'DeepSeek-V4.1-Flash';
+  // The presets, from the safest to the most open. The ids are what is stored in settings.mode:
+  // 'ask' is the original manual mode, and 'bypass' the original bypass mode.
+  const MODES = [
+    { id: 'ask', label: 'Read Only' },
+    { id: 'workspace', label: 'Workspace Write' },
+    { id: 'bypass', label: 'Full access' },
+  ];
+  const DEFAULT_WORKSPACE = 'Default workspace';
+  const GAP_PX = 8;
+  const MARGIN_PX = 8;
+
+  const STYLES = `
+    :host { position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 2147483000; }
+    * { box-sizing: border-box; }
+    .panel {
+      position: fixed; min-width: 180px; padding: 4px; border-radius: 12px; outline: none;
+      font-size: var(--ds-font-size-m, 14px); line-height: 24px;
+      color: var(--dsw-alias-label-primary, #f9fafb);
+      background-color: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-3, #2b2c2f));
+      border: 1px solid var(--dsw-alias-border-l1, rgba(255, 255, 255, .06));
+      box-shadow: 0 0 1px rgba(0, 0, 0, .2), 0 0 4px rgba(0, 0, 0, .02), 0 12px 32px rgba(0, 0, 0, .08);
+    }
+    .panel[hidden] { display: none; }
+    .panel.model { width: 270px; }
+    .list { max-height: 304px; overflow-y: auto; scrollbar-width: thin; }
+    .item {
+      display: flex; align-items: center; gap: 10px; min-height: 24px; padding: 8px 10px; border-radius: 8px;
+      cursor: pointer; user-select: none; overflow: hidden; white-space: nowrap;
+      transition: background-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, cubic-bezier(.4, 0, .2, 1));
+    }
+    .item:hover, .item[aria-selected="true"] { background-color: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, .08)); }
+    .item .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .item .value { display: inline-flex; align-items: center; gap: 4px; color: var(--dsw-alias-label-tertiary, #adb2b8); }
+    .item.static { cursor: default; }
+    .item.static:hover { background: none; }
+    .item.disabled { cursor: not-allowed; }
+    .item.disabled:hover { background: none; }
+    .item.disabled .label { opacity: .55; }
+    .info { display: inline-flex; color: var(--dsw-alias-label-tertiary, #adb2b8); cursor: help; outline: none; margin-left: -4px; }
+    .info:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); border-radius: 50%; }
+    .switch { flex: none; position: relative; width: 34px; height: 20px; margin-left: auto; border-radius: 10px; background: var(--dsw-alias-label-caption, #81858c); opacity: .35; }
+    .switch i { position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--dsw-alias-label-primary, #f9fafb); }
+    .sep { height: 1px; margin: 4px 6px; background: var(--dsw-alias-border-l2, rgba(255, 255, 255, .12)); }
+    .search {
+      display: block; width: 100%; padding: 8px 10px; border: 0; outline: 0; background: none; color: inherit;
+      font: inherit; font-size: var(--ds-font-size-m, 14px); line-height: 24px;
+    }
+    .search::placeholder { color: var(--dsw-alias-label-caption, #81858c); }
+    .empty { padding: 8px 10px; color: var(--dsw-alias-label-tertiary, #adb2b8); }
+    svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .tick, .chev { margin-left: auto; }
+    .value .chev { margin-left: 0; width: 14px; height: 14px; }
+    .tick { width: 15px; height: 15px; }
+    @media (prefers-reduced-motion: reduce) { .item { transition: none; } }
+  `;
+
+  function basename(path) {
+    const parts = String(path).split(/[\\/]+/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : String(path);
+  }
+
+  function samePath(a, b) {
+    return String(a).replace(/[\\/]+$/, '').toLowerCase() === String(b).replace(/[\\/]+$/, '').toLowerCase();
+  }
+
+  function modeLabel(id) {
+    const mode = MODES.find((entry) => entry.id === id);
+    return mode ? mode.label : MODES[0].label;
+  }
+
+  // `icon(name)` returns svg markup, `tooltip` is the shared one of page-controls.js, `getState()`
+  // returns { mode, cwd, workspaces, thinking }, and `actions` carries out what the user picks.
+  function createMenus({ icon, tooltip, getState, actions }) {
+    const host = document.createElement('dsx-menus');
+    const shadow = host.attachShadow({ mode: 'closed' });
+    const style = document.createElement('style');
+    style.textContent = STYLES;
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.tabIndex = -1;
+    panel.hidden = true;
+    shadow.append(style, panel);
+
+    // { kind, anchor, box, onClose, selected, query, view }
+    let active = null;
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function svgNode(name, className) {
+      const holder = document.createElement('template');
+      holder.innerHTML = icon(name);
+      const svg = holder.content.firstElementChild;
+      if (className) svg.setAttribute('class', className);
+      return svg;
+    }
+
+    // A row. `pick` runs on a real click or Enter and is what the row does.
+    function item(label, { iconName, tick, title, pick, valueText, chevron, action, nav = true }) {
+      const node = el('div', 'item');
+      if (action) node.dataset.action = action;
+      node.setAttribute('role', 'menuitem');
+      if (title) node.title = title;
+      if (iconName) node.append(svgNode(iconName));
+      node.append(el('span', 'label', label));
+      if (valueText !== undefined) {
+        const value = el('span', 'value', valueText);
+        if (chevron) value.append(svgNode('chevronRight', 'chev'));
+        node.append(value);
+      }
+      if (tick) node.append(svgNode('check', 'tick'));
+      if (nav) {
+        node.dataset.nav = '';
+        node.pick = pick;
+        node.addEventListener('mousedown', (event) => event.preventDefault());
+        node.addEventListener('mousemove', () => select(node));
+        node.addEventListener('click', (event) => {
+          if (event.isTrusted) pick();
+        });
+      }
+      return node;
+    }
+
+    function navigable() {
+      return [...panel.querySelectorAll('[data-nav]')];
+    }
+
+    function select(target) {
+      const nodes = navigable();
+      active.selected = Math.max(nodes.indexOf(target), 0);
+      nodes.forEach((node, index) => node.setAttribute('aria-selected', String(index === active.selected)));
+    }
+
+    function highlight() {
+      const nodes = navigable();
+      if (!nodes.length) return;
+      active.selected = Math.min(Math.max(active.selected, 0), nodes.length - 1);
+      nodes.forEach((node, index) => {
+        const selected = index === active.selected;
+        node.setAttribute('aria-selected', String(selected));
+        if (selected) node.scrollIntoView({ block: 'nearest' });
+      });
+    }
+
+    // Closes the menu first and then does what was picked, so the focus is already back by then.
+    function pickThen(action) {
+      return () => {
+        close('pick');
+        action();
+      };
+    }
+
+    function renderWorkspace() {
+      const state = getState();
+      const known = state.cwd && !state.workspaces.some((path) => samePath(path, state.cwd)) ? [state.cwd, ...state.workspaces] : state.workspaces;
+      panel.replaceChildren(
+        item(DEFAULT_WORKSPACE, { action: 'workspace-default', iconName: 'folder', tick: !state.cwd, pick: pickThen(() => actions.selectWorkspace('')) }),
+        ...known.map((path) => item(basename(path), {
+          action: 'workspace-saved', iconName: 'folder', tick: samePath(path, state.cwd), title: path, pick: pickThen(() => actions.selectWorkspace(path)),
+        })),
+        el('div', 'sep'),
+        item('Add workspace...', { action: 'add-workspace', iconName: 'plus', pick: pickThen(() => actions.addWorkspace()) }),
+      );
+    }
+
+    function permissionRows(list) {
+      const state = getState();
+      const query = active.query.trim().toLowerCase();
+      const shown = MODES.filter((mode) => mode.label.toLowerCase().includes(query));
+      if (!shown.length) {
+        list.replaceChildren(el('div', 'empty', 'No matching option'));
+        return;
+      }
+      list.replaceChildren(...shown.map((mode) => item(mode.label, {
+        action: `mode-${mode.id}`, tick: mode.id === state.mode, pick: pickThen(() => actions.selectMode(mode.id)),
+      })));
+    }
+
+    function renderPermission() {
+      const search = el('input', 'search');
+      search.type = 'text';
+      search.placeholder = 'Search...';
+      search.setAttribute('aria-label', 'Search');
+      search.autocomplete = 'off';
+      search.spellcheck = false;
+      search.value = active.query;
+      const list = el('div', 'list');
+      list.setAttribute('role', 'menu');
+      search.addEventListener('input', () => {
+        active.query = search.value;
+        active.selected = 0;
+        permissionRows(list);
+        highlight();
+      });
+      panel.replaceChildren(search, list);
+      permissionRows(list);
+    }
+
+    function renderModel() {
+      const state = getState();
+      if (active.view === 'effort') {
+        const back = item('Effort', { action: 'effort-back', iconName: 'chevronLeft', pick: () => { active.view = 'main'; active.selected = 0; render(); } });
+        panel.replaceChildren(
+          back,
+          el('div', 'sep'),
+          item('On', { action: 'effort-on', tick: state.thinking, pick: () => { actions.setThinking(true); active.view = 'main'; active.selected = 0; render(); } }),
+          item('Off', { action: 'effort-off', tick: !state.thinking, pick: () => { actions.setThinking(false); active.view = 'main'; active.selected = 0; render(); } }),
+        );
+        return;
+      }
+
+      // The model is fixed: its row only shows it and cannot be opened.
+      const modelRow = item('Model', { valueText: MODEL_NAME, nav: false });
+      modelRow.classList.add('static');
+      const effortRow = item('Effort', {
+        action: 'effort-row', valueText: state.thinking ? 'On' : 'Off', chevron: true,
+        pick: () => { active.view = 'effort'; active.selected = getState().thinking ? 1 : 2; render(); },
+      });
+
+      // Agent teamwork is not built yet. The row is inert, and its (i) says so.
+      const teamwork = el('div', 'item disabled');
+      teamwork.setAttribute('role', 'menuitem');
+      teamwork.setAttribute('aria-disabled', 'true');
+      const teamworkLabel = el('span', 'label', 'Enable agent teamwork');
+      const info = el('span', 'info');
+      info.tabIndex = 0;
+      info.setAttribute('aria-label', 'Work in progress');
+      info.append(svgNode('info'));
+      tooltip.bind(info, () => 'Work in progress');
+      const toggle = el('span', 'switch');
+      toggle.append(document.createElement('i'));
+      teamwork.append(teamworkLabel, info, toggle);
+      // The label dims on its own, not the (i), which has to stay readable for its tooltip.
+
+      panel.replaceChildren(modelRow, effortRow, teamwork);
+    }
+
+    function render() {
+      if (!active) return;
+      tooltip.hide();
+      panel.className = `panel ${active.kind}`;
+      if (active.kind === 'workspace') renderWorkspace();
+      else if (active.kind === 'permission') renderPermission();
+      else renderModel();
+      position();
+      highlight();
+      const search = panel.querySelector('.search');
+      if (search) search.focus({ preventScroll: true });
+      else panel.focus({ preventScroll: true });
+    }
+
+    function position() {
+      const anchorRect = active.anchor.getBoundingClientRect();
+      const boxRect = active.box ? active.box.getBoundingClientRect() : anchorRect;
+      panel.style.left = '0px';
+      panel.style.top = '0px';
+      panel.style.width = active.kind === 'permission' ? `${Math.round(boxRect.width)}px` : '';
+      panel.hidden = false;
+      const size = panel.getBoundingClientRect();
+      let left;
+      let top;
+      if (active.kind === 'workspace') {
+        // Under the button, or above it when the page ends before the list does.
+        left = anchorRect.left;
+        top = anchorRect.bottom + GAP_PX / 2;
+        if (top + size.height > window.innerHeight - MARGIN_PX) top = anchorRect.top - GAP_PX / 2 - size.height;
+      } else if (active.kind === 'model') {
+        left = anchorRect.right - size.width;
+        top = anchorRect.top - GAP_PX - size.height;
+        if (top < MARGIN_PX) top = anchorRect.bottom + GAP_PX;
+      } else {
+        // Across the composer, sitting on its top edge.
+        left = boxRect.left;
+        top = boxRect.top - GAP_PX - size.height;
+        if (top < MARGIN_PX) top = boxRect.bottom + GAP_PX;
+      }
+      left = Math.min(Math.max(left, MARGIN_PX), Math.max(window.innerWidth - size.width - MARGIN_PX, MARGIN_PX));
+      panel.style.left = `${Math.round(left)}px`;
+      panel.style.top = `${Math.round(top)}px`;
+    }
+
+    // `reason` is 'pick', 'escape', 'outside' or 'toggle', so the caller knows whether to take the focus back.
+    function close(reason) {
+      if (!active) return;
+      const { onClose } = active;
+      active = null;
+      tooltip.hide();
+      panel.hidden = true;
+      panel.replaceChildren();
+      if (onClose) onClose(reason);
+    }
+
+    function open(kind, { anchor, box, onClose }) {
+      if (active) close('toggle');
+      if (!document.body) return;
+      if (!host.isConnected) document.body.append(host);
+      const mode = getState().mode;
+      active = { kind, anchor, box, onClose, query: '', view: 'main', selected: kind === 'permission' ? Math.max(MODES.findIndex((entry) => entry.id === mode), 0) : 0 };
+      render();
+    }
+
+    panel.addEventListener('keydown', (event) => {
+      if (!active || !event.isTrusted || event.isComposing) return;
+      const nodes = navigable();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        close('escape');
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (!nodes.length) return;
+        active.selected = (active.selected + (event.key === 'ArrowDown' ? 1 : -1) + nodes.length) % nodes.length;
+        highlight();
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        const node = nodes[active.selected];
+        if (node && node.pick) node.pick();
+      } else if (event.key === 'Tab') {
+        // The panel is a small world of its own: Tab does not wander off into the page behind it.
+        event.preventDefault();
+      }
+    });
+
+    document.addEventListener('mousedown', (event) => {
+      if (!active || !event.isTrusted) return;
+      const path = event.composedPath();
+      if (path.includes(host) || path.includes(active.anchor)) return;
+      close('outside');
+    }, true);
+    window.addEventListener('resize', () => close('outside'));
+
+    return {
+      host,
+      open,
+      close,
+      isOpen: (kind) => Boolean(active) && (!kind || active.kind === kind),
+      refresh: () => { if (active) render(); },
+    };
+  }
+
+  root.DsxMenus = { createMenus, MODES, MODEL_NAME, DEFAULT_WORKSPACE, basename, samePath, modeLabel };
+})(globalThis);

@@ -46,17 +46,19 @@ You need [Node.js](https://nodejs.org) 18 or newer. This is also the way to inst
 
 ## Using it
 
-All controls sit on the DeepSeek page, in the row with DeepThink and Search. The extension has no toolbar popup. To turn it off, disable the extension in the browser.
+All controls sit in the composer of the DeepSeek page. The extension has no toolbar popup. To turn it off, disable the extension in the browser.
 
-- The folder icon opens your system's folder dialog and sets the working directory.
-- The Manual / Bypass button switches the permission mode. A short pixel wave crosses the composer when you do: red for Bypass, white for Manual.
+- **Default workspace**, above the composer, is the working directory. Its menu lists the folders you used before; "Add workspace..." opens your system's folder dialog.
+- The paperclip opens DeepSeek's own file dialog.
+- The permission button (**Read Only**, **Workspace Write**, **Full access**) opens a menu of presets. A short pixel wave crosses the composer when you change it: white, or red and flickering while Evil Mode is on, whatever the preset.
+- The model button opens a small panel. The model is fixed. **Effort** is on or off and works exactly like DeepSeek's DeepThink button, which the extension hides and drives for you. Search is always on, and its button is hidden too. "Enable agent teamwork" is not built yet and cannot be clicked.
 - "Thought for N seconds" blocks are kept collapsed. Click one to read it, and it stays open. To stop this, run `chrome.storage.local.set({ collapseThinking: false })` in the extension's service worker console.
 
 The model chooses the timeout of each command, up to 600 seconds.
 
 ### Slash commands
 
-Type `/` at the start of the composer to open a menu of commands, in DeepSeek's own dropdown style. Keep typing to filter it. Arrow keys move, **Tab** completes the highlighted command, **Enter** runs it, and **Esc** closes the menu. A command that takes an argument, such as `/mode`, completes to `/mode ` and then suggests its arguments. A command is never sent to DeepSeek.
+Type `/` at the start of the composer to open a menu of commands in three groups (Add, Commands, Skills), listing only what works, in DeepSeek's own dropdown style. Keep typing to filter it. Arrow keys move, **Tab** completes the highlighted command, **Enter** or a click runs it, and **Esc** closes the menu. A command that takes an argument, such as `/thinking`, completes to `/thinking ` and then suggests its arguments. **Tab** on Permission or Model opens their menu. A command is never sent to DeepSeek.
 
 Tab does not move the focus out of the composer, so it can be used for completion. Everywhere else on the page it works as usual.
 
@@ -64,9 +66,11 @@ A message that only starts with a slash, such as `/etc/hosts what is this file`,
 
 | Command | What it does |
 | --- | --- |
-| `/mode manual` or `/mode bypass` | Switches the permission mode, with the same wave as the button. |
-| `/cd` | Opens the folder dialog to choose the working directory. |
-| `/status` | Shows the extension version, the shell host, the mode, the folder and the thinking setting. |
+| `/file` | Opens DeepSeek's file dialog, like the paperclip. |
+| `/feedback` | Opens the project's issue page in a new tab. |
+| `/permission` | Opens the permission presets, like the permission button. |
+| `/model` | Opens the model panel, like the model button. |
+| `/status` | Shows the extension version, the shell host, the permissions, the workspace, the effort and the thinking setting. |
 | `/thinking collapse` or `/thinking default` | Keeps the thinking blocks collapsed, or leaves them as DeepSeek shows them. |
 | `/evil` | Turns your own instructions for the model, read from `evil.txt`, on or off in the hidden prompt. See below. |
 | `/update` | Asks GitHub for the latest release now, and shows the update pill again if it was closed. It works even when the automatic check is off, because you are asking for it. |
@@ -102,20 +106,21 @@ It needs Node.js, git and the [GitHub CLI](https://cli.github.com) logged in to 
 
 ## Permission modes
 
-| Mode | What happens |
+| Preset | What happens |
 | --- | --- |
-| Manual (default) | `shell`, `write` and `edit` wait for your approval, with a diff for edits. `read`, `glob` and `grep` run by themselves inside the working directory you picked, and ask first anywhere else and for sensitive files such as `.env` and SSH keys. "Always allow in this chat" skips the question until the page is reloaded. |
-| Bypass | Commands run at once, without asking. The button turns red and cards are marked `auto`. |
+| Read Only (default) | `shell`, `write` and `edit` wait for your approval, with a diff for edits. `read`, `glob` and `grep` run by themselves inside the workspace you picked, and ask first anywhere else and for sensitive files such as `.env` and SSH keys. "Always allow in this chat" skips the question until the page is reloaded. |
+| Workspace Write | Like Read Only, and `write` and `edit` also run by themselves inside the workspace, except for sensitive files. `shell` still asks, because a command can reach anywhere. |
+| Full access | Commands run at once, without asking. Cards are marked `auto`. |
 
-Both modes stop and ask after 25 automatic changes in a row. Commands replayed from a resumed stream always ask, and commands found in the chat history never run again.
+Every preset stops and asks after 25 automatic changes in a row. Commands replayed from a resumed stream always ask, and commands found in the chat history never run again.
 
 ## Security
 
-Read this before you use Bypass.
+Read this before you use Full access.
 
-- Commands run with your user's full rights. In Bypass mode nothing stands between the model and your machine.
+- Commands run with your user's full rights. In Full access mode nothing stands between the model and your machine.
 - The model reads things you did not write: web search results, file contents, command output. They can contain instructions meant to steer it (prompt injection).
-- In Bypass mode, a script running on chat.deepseek.com could trigger a command by forging the message the page hook sends. In Manual mode it could only make an approval card appear. The cards live in a closed shadow root and react only to real clicks.
+- In Full access mode, a script running on chat.deepseek.com could trigger a command by forging the message the page hook sends. In Read Only mode it could only make an approval card appear. The cards live in a closed shadow root and react only to real clicks.
 - The danger labels on approval cards are pattern matches. They miss things, so read the command itself.
 - Everything a tool reads and everything a command prints is sent to DeepSeek's servers, secrets included. `glob` and `grep` skip common secret files. `shell` and an approved `read` do not.
 
@@ -136,6 +141,7 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/evil-awakening.js` | The animation played when `/evil` is turned on |
 | `extension/evil-greeting.js` | The tougher greetings on an empty chat while `/evil` is on |
 | `extension/page-controls.js` | The status pill, the composer buttons, the context meter, tooltips and the mode animation |
+| `extension/menus.js` | The workspace, permission and model menus |
 | `extension/think-collapse.js` | Keeps the thinking blocks collapsed |
 | `extension/background.js` | Connects tabs to the native host |
 | `host/host.js` | Runs commands and tools, streams output, enforces timeouts and kills |

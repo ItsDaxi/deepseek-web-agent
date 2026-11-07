@@ -36,3 +36,15 @@ textarea[data-dsx-sending] {
   flex: 1 1 0;
   min-width: 0;
 }
+
+/* DeepSeek's own DeepThink, Search and attach buttons. The extension's controls replace them and drive
+   them, so they stay in the page (and keep working) but are not drawn. */
+[data-dsx-hidden] {
+  display: none !important;
+}
+
+/* The shortcut hint DeepSeek draws inside "New chat" would sit on top of its label next to the Evil Mode
+   button. page-controls.js marks the button. */
+[data-dsx-newchat]::after {
+  content: none !important;
+}

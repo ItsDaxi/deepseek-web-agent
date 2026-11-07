@@ -1,4 +1,4 @@
-// "Evil Awakening": the short transition played when /evil is turned on. It only draws: a canvas in a
+// "Evil Awakening": the short transition played when /evil is turned on or off. It only draws: a canvas in a
 // closed shadow root and a Web Animation on the page's own logos. Nothing it does outlasts the
 // animation except the final state, which is the data-dsx-evil attribute that onActivate sets (the red
 // theme and logos, in evil.css and logos.css).

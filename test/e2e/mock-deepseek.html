@@ -13,39 +13,59 @@
         --dsw-alias-state-error-primary: #f25a5a; --dsw-alias-state-success-primary: #22c55e; --dsw-specific-tip: #353638;
         margin: 0; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: 16px/28px Inter, system-ui, sans-serif;
       }
+      #new-chat::after { content: "Ctrl J"; position: absolute; right: 11px; font-size: 14px; opacity: 1; }
       main { max-width: 760px; margin: 0 auto; padding: 40px 16px 140px; }
       .user { display: flex; justify-content: flex-end; margin: 18px 0; }
       .user .ds-message { background: #2b2c2f; padding: 6px 14px; border-radius: 14px; }
       .ds-think-content { color: #81858c; font-size: 13px; border-left: 2px solid #353638; padding-left: 12px; margin-bottom: 8px; white-space: pre-wrap; }
       .ds-markdown p { margin: 0 0 10px; white-space: pre-wrap; }
       .md-code-block { border: 1px solid rgba(255,255,255,.12); border-radius: 12px; margin: 10px 0; padding: 10px; }
-      form { position: fixed; bottom: 16px; left: 0; right: 0; max-width: 760px; margin: 0 auto; background: #2b2c2f; border: 1px solid rgba(255,255,255,.12); border-radius: 24px; padding: 12px; box-sizing: border-box; }
+      .composer-wrap { position: fixed; bottom: 16px; left: 0; right: 0; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; }
+      form { position: static; background: #2b2c2f; border: 1px solid rgba(255,255,255,.12); border-radius: 24px; padding: 12px; box-sizing: border-box; }
       textarea { width: 100%; height: 44px; box-sizing: border-box; background: none; color: inherit; border: 0; outline: 0; resize: none; font: inherit; }
       .composer-row { display: flex; align-items: center; justify-content: space-between; }
       .composer-toggles { display: flex; align-items: center; gap: 8px; }
+      .composer-actions { display: flex; align-items: center; gap: 8px; }
+      .ds-icon-button { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; }
       .composer-send { width: 34px; height: 34px; border-radius: 50%; background: var(--dsw-alias-brand-primary); display: flex; align-items: center; justify-content: center; }
       .ds-toggle-button { box-sizing: border-box; display: inline-flex; align-items: center; height: 34px; padding: 10px; border-radius: 18px; font-size: 13px; font-weight: 500; border: 1px solid var(--dsw-alias-border-l2); }
       .ds-toggle-button--selected { color: var(--dsw-alias-brand-text); border-color: var(--dsw-alias-button-ghost-active-border); background-color: var(--dsw-alias-button-ghost-active-fill); }
     </style>
   </head>
   <body>
+    <aside style="position: fixed; left: 0; top: 0; width: 260px; padding: 16px 11px; box-sizing: border-box">
+      <div><div><svg viewBox="0 0 143 23" width="143" height="23"></svg></div></div>
+      <div style="margin-top: 20px"><div><div tabindex="0" id="new-chat" style="position: relative; display: flex; align-items: center; justify-content: center; height: 40px; border-radius: 999px; background: rgb(50, 51, 54); font-size: 14px; font-weight: 500">New chat</div></div></div>
+    </aside>
     <main class="ds-virtual-list"><div id="messages"></div></main>
+    <div class="composer-wrap">
     <form onsubmit="return false">
       <textarea id="composer" placeholder="Message DeepSeek"></textarea>
       <div class="composer-row">
         <div class="composer-toggles">
-          <div class="ds-toggle-button ds-toggle-button--m ds-toggle-button--selected">DeepThink</div>
-          <div class="ds-toggle-button ds-toggle-button--m ds-toggle-button--selected">Search</div>
+          <div class="ds-toggle-button ds-toggle-button--m ds-toggle-button--selected" id="deepthink" role="button">DeepThink</div>
+          <div class="ds-toggle-button ds-toggle-button--m ds-toggle-button--selected" id="search" role="button">Search</div>
         </div>
-        <div class="composer-send">↑</div>
+        <div class="composer-actions">
+          <div class="ds-icon-button" id="attach" role="button">📎</div>
+          <div class="composer-send" role="button">↑</div>
+        </div>
+        <input type="file" id="file-input" hidden />
       </div>
     </form>
+    </div>
     <script>
       // Reproduces the behavior of the real page that the extension depends on: requests through
       // XMLHttpRequest, patches parsed cumulatively from responseText, and history on load.
       const sessionId = location.pathname.split('/').pop();
       const list = document.getElementById('messages');
       const composer = document.getElementById('composer');
+      for (const toggle of document.querySelectorAll('.ds-toggle-button')) {
+        toggle.addEventListener('click', () => toggle.classList.toggle('ds-toggle-button--selected'));
+      }
+      const isOn = (id) => document.getElementById(id).classList.contains('ds-toggle-button--selected');
+      // The attach button opens the file input, as DeepSeek's does.
+      document.getElementById('attach').addEventListener('click', () => { window.__attachClicks = (window.__attachClicks || 0) + 1; });
       let busy = false;
       let lastMessageId = null;
 
@@ -145,7 +165,7 @@
           offset = text.length;
           if (xhr.readyState === 4) busy = false;
         };
-        xhr.send(JSON.stringify({ chat_session_id: sessionId, parent_message_id: lastMessageId, model_type: 'default', prompt: text, ref_file_ids: [], thinking_enabled: true, search_enabled: true, action: null, preempt: false }));
+        xhr.send(JSON.stringify({ chat_session_id: sessionId, parent_message_id: lastMessageId, model_type: 'default', prompt: text, ref_file_ids: [], thinking_enabled: isOn('deepthink'), search_enabled: isOn('search'), action: null, preempt: false }));
       }
 
       composer.addEventListener('keydown', (event) => {

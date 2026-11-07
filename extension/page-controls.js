@@ -9,46 +9,63 @@
     shield: '<path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3"/><path d="M9 12l2 2l4 -4"/>',
     bolt: '<path d="M13 3v7h6l-8 11v-7h-6l8 -11"/>',
     arrowUp: '<path d="M12 19v-14"/><path d="M18 11l-6 -6l-6 6"/>',
+    target: '<circle cx="12" cy="12" r="1"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="9"/>',
+    plan: '<path d="M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2"/><path d="M9 3m0 2a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v0a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z"/><path d="M9 12h6"/><path d="M9 16h6"/>',
+    send: '<path d="M10 14l11 -11"/><path d="M21 3l-6.5 18a.55 .55 0 0 1 -1 0l-3.5 -7l-7 -3.5a.55 .55 0 0 1 0 -1l18 -6.5"/>',
+    compact: '<path d="M12 3a9 9 0 1 0 9 9"/>',
+    database: '<path d="M4 6a8 3 0 1 0 16 0a8 3 0 1 0 -16 0"/><path d="M4 6v6a8 3 0 0 0 16 0v-6"/><path d="M4 12v6a8 3 0 0 0 16 0v-6"/>',
+    download: '<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4v12"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M12 17v.01"/><path d="M12 13.5a1.5 1.5 0 0 1 1 -1.5a2.6 2.6 0 1 0 -3 -4"/>',
+    paperclip: '<path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5"/>',
+    chevronDown: '<path d="M6 9l6 6l6 -6"/>',
+    chevronRight: '<path d="M9 6l6 6l-6 6"/>',
+    chevronLeft: '<path d="M15 6l-6 6l6 6"/>',
+    check: '<path d="M5 12l5 5l10 -10"/>',
+    plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 12h1v4h1"/>',
     flame: '<path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z"/>',
   };
 
+  // The buttons of the composer row are quiet: no border until the mouse is over them, like the
+  // rest of the row. The round one (attach) has a soft fill, and the red one marks Full access.
   const BUTTON_STYLES = `
     :host { display: inline-flex; }
     button {
-      box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-      height: 34px; padding: 10px; border-radius: 18px; cursor: pointer; user-select: none; outline: none; position: relative;
+      box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      height: 34px; padding: 0 10px; border-radius: 18px; cursor: pointer; user-select: none; outline: none; position: relative;
       font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap;
       color: var(--dsw-alias-label-primary, #f9fafb); background: none;
-      border: 1px solid var(--dsw-alias-border-l2, rgba(255,255,255,.12));
+      border: 1px solid transparent;
       transition: border .2s ease, background .2s ease;
     }
-    button:hover { background-color: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); }
+    button:hover, button[aria-expanded="true"] { background-color: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.08)); }
     button:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); }
-    button.selected { color: var(--dsw-alias-brand-text, #679efe); border-color: var(--dsw-alias-button-ghost-active-border, rgba(86,134,254,.5)); background-color: var(--dsw-alias-button-ghost-active-fill, rgba(86,134,254,.1)); }
-    button.selected:hover { background-color: var(--dsw-alias-button-ghost-active-hover, rgba(86,134,254,.18)); }
-    button.danger { color: var(--dsw-alias-state-error-primary, #f25a5a); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 55%, transparent); background-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 12%, transparent); }
-    button.danger:hover { background-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 20%, transparent); }
-    /* With /evil on, the folder button (when a folder is chosen) matches Bypass and the red toggles. */
-    :host-context(html[data-dsx-evil]) button.selected { color: var(--dsw-alias-state-error-primary, #f25a5a); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 55%, transparent); background-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 12%, transparent); }
-    :host-context(html[data-dsx-evil]) button.selected:hover { background-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 20%, transparent); }
+    button.round { width: 34px; padding: 0; border-radius: 50%; background-color: color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 10%, transparent); }
+    button.round:hover { background-color: color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 18%, transparent); }
+    button.workspace { height: 30px; padding: 0 8px; border-radius: 8px; font-weight: 600; }
     button.busy { opacity: .4; cursor: progress; }
+    .muted { color: var(--dsw-alias-label-tertiary, #adb2b8); font-weight: 400; }
     svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    svg.chev { width: 12px; height: 12px; opacity: .7; }
+    button.round svg { width: 17px; height: 17px; }
     @media (prefers-reduced-motion: reduce) { button { transition: none; } }
   `;
 
-  // The Evil Mode button, a square next to "New chat" in the sidebar. It takes the height of the row,
-  // so it stays square whatever size DeepSeek gives that button. Off it is a quiet filled square; on it
-  // looks like the Bypass button.
+  // The Evil Mode button, next to "New chat" in the sidebar. It takes the height of the row, so it stays
+  // round whatever size DeepSeek gives that button, and it copies the fill, the corners and the text
+  // colour of "New chat" (mount() sets --dsx-bg, --dsx-radius and --dsx-color), so the two look like a
+  // pair. On, it turns red.
   const EVIL_BUTTON_STYLES = `
     :host { display: flex; flex: none; align-self: stretch; aspect-ratio: 1 / 1; min-width: 34px; }
     button {
       box-sizing: border-box; width: 100%; height: 100%; display: inline-flex; align-items: center; justify-content: center; padding: 0;
-      border-radius: 12px; cursor: pointer; user-select: none; outline: none; font: inherit; position: relative;
-      color: var(--dsw-alias-label-secondary, #cfd3d6); border: 1px solid transparent;
-      background: color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 10%, transparent);
+      border-radius: var(--dsx-radius, 999px); cursor: pointer; user-select: none; outline: none; font: inherit; position: relative;
+      color: var(--dsx-color, var(--dsw-alias-label-primary, #f9fafb)); border: 1px solid transparent;
+      background: var(--dsx-bg, color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 10%, transparent));
+      box-shadow: var(--dsx-shadow, none);
       transition: background .2s ease, border .2s ease, color .2s ease;
     }
-    button:hover { color: var(--dsw-alias-label-primary, #f9fafb); background: color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 18%, transparent); }
+    button:hover { background: color-mix(in srgb, var(--dsx-bg, var(--dsw-alias-bg-layer-3, #2b2c2f)) 90%, var(--dsw-alias-label-primary, #f9fafb) 10%); }
     button:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); }
     button.on { color: var(--dsw-alias-state-error-primary, #f25a5a); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 55%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 12%, transparent); }
     button.on:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 20%, transparent); }
@@ -66,6 +83,27 @@
     const row = header && header.nextElementSibling;
     const button = row && row.firstElementChild;
     return button && button.querySelector('[tabindex]') ? row : null;
+  }
+
+  // DeepSeek draws the shortcut hint of "New chat" ("Ctrl J") with a ::after rule on the button, shown on
+  // hover. Once the button gives room to the Evil Mode button the hint lands on top of the label, so the
+  // button is marked here and page.css switches the hint off. The marked element is the pill itself,
+  // the one with a tabindex, found from the row and not from DeepSeek's class names.
+  function markNewChatButton(row) {
+    const pill = row.firstElementChild && row.firstElementChild.querySelector('[tabindex]');
+    if (pill && !pill.hasAttribute('data-dsx-newchat')) pill.setAttribute('data-dsx-newchat', '');
+    return pill;
+  }
+
+  // The look of the "New chat" button: the first element inside it that is actually filled.
+  function readNewChatLook(button) {
+    for (const node of [button, ...button.querySelectorAll('*')]) {
+      const style = getComputedStyle(node);
+      if (/^rgba?\(\s*\d+[ ,]+\d+[ ,]+\d+\s*\)$/.test(style.backgroundColor) || /rgba?\(.*[ ,/]\s*0?\.[1-9]/.test(style.backgroundColor)) {
+        return { bg: style.backgroundColor, radius: style.borderTopLeftRadius, color: style.color, shadow: style.boxShadow };
+      }
+    }
+    return null;
   }
 
   // The context meter, left of the attach button: a ring and "used / limit" in tokens. It is not a
@@ -198,24 +236,30 @@
     window.addEventListener('scroll', hide, true);
     window.addEventListener('resize', hide);
 
-    return { host: tip.host, bind, refresh };
+    return { host: tip.host, bind, refresh, hide };
   }
 
   // ---- Mode switch wave ------------------------------------------------------------------------
-  // A short pixel wave across the composer when the permission mode changes: red for bypass,
-  // light for manual. Cells are dithered with a Bayer matrix and a little fixed noise, so the
-  // front reads as a detailed pixel pattern instead of a smooth gradient.
+  // A short pixel wave across the composer when the permission mode changes: white, or red in Evil Mode,
+  // where it also flickers: it is redrawn in steps, a frame now and then drops out, the edge shimmers
+  // and the red changes in strength from frame to frame. Cells are
+  // dithered with a Bayer matrix and a little fixed noise, so the front reads as a detailed pixel
+  // pattern instead of a smooth gradient.
 
   const WAVE_STYLES = `
-    :host { position: fixed; z-index: 2147483000; pointer-events: none; overflow: hidden; }
+    :host { position: fixed; z-index: 2147482999; pointer-events: none; overflow: hidden; }
     canvas { display: block; width: 100%; height: 100%; }
   `;
   const WAVE_CELL_PX = 4;
   const WAVE_DURATION_MS = 1300;
   const WAVE_LEVELS = 5;
+  const FLICKER_DURATION_MS = 1100;
+  const FLICKER_FRAME_MS = 45;
+  const FLICKER_DROP_CHANCE = 0.2;
   const WAVE_TONES = {
-    danger: { rgb: [242, 90, 90], alpha: 0.75 },
     light: { rgb: [255, 255, 255], alpha: 0.6 },
+    // Evil Mode, whatever the preset.
+    danger: { rgb: [242, 90, 90], alpha: 0.75 },
     // White would vanish on DeepSeek's light theme, so it turns into a soft grey there.
     lightOnLight: { rgb: [96, 102, 118], alpha: 0.42 },
   };
@@ -271,6 +315,8 @@
       const width = Math.round(rect.width);
       const height = Math.round(rect.height);
       if (width < 40 || height < 20) return;
+
+      const flicker = kind === 'danger';
       const ratio = window.devicePixelRatio || 1;
       const columns = Math.ceil(width / WAVE_CELL_PX);
       const rows = Math.ceil(height / WAVE_CELL_PX);
@@ -303,9 +349,29 @@
       const travel = farthest + 110;
       const levels = new Uint8Array(columns * rows);
       const startedAt = performance.now();
+      let lastDrawn = -FLICKER_FRAME_MS;
 
       function draw(now) {
-        const progress = Math.min((now - startedAt) / WAVE_DURATION_MS, 1);
+        const progress = Math.min((now - startedAt) / (flicker ? FLICKER_DURATION_MS : WAVE_DURATION_MS), 1);
+        if (progress >= 1) {
+          stop();
+          return;
+        }
+        let strengthFactor = 1;
+        if (flicker) {
+          // Redrawn about every 45 ms, and now and then a frame is left empty, so it flickers.
+          if (now - lastDrawn < FLICKER_FRAME_MS) {
+            frame = requestAnimationFrame(draw);
+            return;
+          }
+          lastDrawn = now;
+          if (progress > 0.04 && Math.random() < FLICKER_DROP_CHANCE) {
+            context.clearRect(0, 0, width, height);
+            frame = requestAnimationFrame(draw);
+            return;
+          }
+          strengthFactor = 0.55 + Math.random() * 0.45;
+        }
         const front = travel * (1 - (1 - progress) ** 1.8);
         const envelope = Math.min(1, (1 - progress) * 1.7);
         levels.fill(0);
@@ -322,7 +388,9 @@
             // The border of the box catches the wave a little more, so its outline lights up.
             if (Math.min(x, width - x, y, height - y) < 7) strength += 0.3 * Math.exp(-Math.abs(behind) / 60);
             const threshold = (BAYER_4[(row & 3) * 4 + (column & 3)] / 16) * 0.7 + cellNoise(column, row) * 0.3;
-            levels[row * columns + column] = Math.max(0, Math.min(WAVE_LEVELS, Math.floor(Math.min(strength * envelope, 1) * WAVE_LEVELS + threshold)));
+            // The edge of a flickering wave shimmers: every frame each cell is nudged by chance.
+            const shimmer = flicker ? (Math.random() - 0.5) * 0.7 : 0;
+            levels[row * columns + column] = Math.max(0, Math.min(WAVE_LEVELS, Math.floor(Math.min(Math.max(strength * envelope * strengthFactor + shimmer, 0), 1) * WAVE_LEVELS + threshold)));
           }
         }
 
@@ -335,8 +403,7 @@
           }
         }
 
-        if (progress < 1) frame = requestAnimationFrame(draw);
-        else stop();
+        frame = requestAnimationFrame(draw);
       }
 
       frame = requestAnimationFrame(draw);
@@ -357,7 +424,30 @@
     return null;
   }
 
-  function createPageControls({ onPickFolder, onChangeMode, onDismissUpdate, onToggleEvil }) {
+  // The toggles DeepSeek draws itself: DeepThink and Search. The extension hides them and drives them
+  // from its own controls, so the page keeps working exactly as if they had been clicked.
+  function findNativeToggles(group) {
+    const list = [...group.querySelectorAll('.ds-toggle-button')];
+    const think = list.find((toggle) => /think/i.test(toggle.textContent || '')) || list[0] || null;
+    const search = list.find((toggle) => toggle !== think && /search/i.test(toggle.textContent || '')) || list.find((toggle) => toggle !== think) || null;
+    return { think, search };
+  }
+
+  // The last visible textarea, which is the composer.
+  function findComposerArea() {
+    const areas = [...document.querySelectorAll('textarea')].filter((area) => area.getClientRects().length > 0);
+    return areas[areas.length - 1] || null;
+  }
+
+  const TOGGLE_CLICK_GAP_MS = 500;
+  const TOGGLE_MAX_TRIES = 6;
+
+  function chevron() {
+    return iconMarkup('chevronDown').replace('<svg ', '<svg class="chev" ');
+  }
+
+  function createPageControls({ onPickFolder, onChangeMode, onSelectWorkspace, onSetThinking, onDismissUpdate, onToggleEvil }) {
+    const { MODES, MODEL_NAME, DEFAULT_WORKSPACE, basename, modeLabel } = root.DsxMenus;
     const pill = attach(
       'dsx-status',
       PILL_STYLES,
@@ -369,11 +459,18 @@
     const updateClose = updateBox.querySelector('button');
     const statusLabel = pill.shadow.querySelector('.status span');
     let updateTag = '';
-    const folder = attach('dsx-composer-button', BUTTON_STYLES, `<button type="button" data-action="pick-folder">${iconMarkup('folder')}</button>`);
-    const permission = attach('dsx-composer-button', BUTTON_STYLES, '<button type="button" data-action="cycle-permission"></button>');
+
+    // Above the composer: the workspace. Inside it: attach and the permission preset on the left, the
+    // model on the right. The attach button opens DeepSeek's own file dialog.
+    const workspace = attach('dsx-workspace', BUTTON_STYLES, `<button type="button" class="workspace" data-action="workspace-menu" aria-haspopup="menu" aria-expanded="false">${iconMarkup('folder')}<span class="label"></span>${chevron()}</button>`);
+    const attachment = attach('dsx-composer-button', BUTTON_STYLES, `<button type="button" class="round" data-action="attach" aria-label="Attach file">${iconMarkup('paperclip')}</button>`);
+    const permission = attach('dsx-composer-button', BUTTON_STYLES, '<button type="button" data-action="permission-menu" aria-haspopup="menu" aria-expanded="false"></button>');
+    const model = attach('dsx-composer-button', BUTTON_STYLES, `<button type="button" data-action="model-menu" aria-haspopup="menu" aria-expanded="false"><span class="name"></span><span class="muted effort"></span>${chevron()}</button>`);
 
     // DeepSeek spaces its toggles with their own margins, so the first button brings its own.
-    folder.host.style.marginRight = '8px';
+    attachment.host.style.marginRight = '8px';
+    model.host.style.marginRight = '8px';
+    workspace.host.style.cssText = 'display: flex; align-self: flex-start; margin: 0 0 8px 4px;';
 
     const meter = attach(
       'dsx-context',
@@ -388,36 +485,110 @@
     const evilButton = evil.shadow.querySelector('button');
 
     const pillBox = pill.shadow.querySelector('.status');
-    const folderButton = folder.shadow.querySelector('button');
+    const workspaceButton = workspace.shadow.querySelector('button');
+    const workspaceLabel = workspace.shadow.querySelector('.label');
+    const attachButton = attachment.shadow.querySelector('button');
     const permissionButton = permission.shadow.querySelector('button');
+    const modelButton = model.shadow.querySelector('button');
+    const modelName = model.shadow.querySelector('.name');
+    const modelEffort = model.shadow.querySelector('.effort');
     const tooltip = createTooltip();
     const wave = createWave();
-    let mode = 'ask';
+    let current = { mode: 'ask', cwd: '', workspaces: [], thinking: true };
+    // DeepSeek's own attach button and toggles, found in the last mount, and the clicks spent on
+    // keeping the toggles in step.
+    let nativeAttach = null;
+    let nativeToggles = { think: null, search: null };
+    const toggleSync = { lastClick: { think: 0, search: 0 }, tries: { think: 0, search: 0 } };
     // What each tooltip says right now. The tooltips read it when they show, and update() fills it in.
-    const tips = { pill: '', folder: '', permission: '', context: '', evil: '', update: 'Open the release page. Run the new setup and the extension updates itself.' };
+    const tips = { pill: '', workspace: '', permission: '', attach: 'Attach files', context: '', evil: '', update: 'Open the release page. Run the new setup and the extension updates itself.' };
     tooltip.bind(meterBox, () => tips.context);
     tooltip.bind(evilButton, () => tips.evil);
     tooltip.bind(pillBox, () => tips.pill);
     tooltip.bind(updateLink, () => tips.update);
-    tooltip.bind(folderButton, () => tips.folder);
+    tooltip.bind(workspaceButton, () => tips.workspace);
     tooltip.bind(permissionButton, () => tips.permission);
+    tooltip.bind(attachButton, () => tips.attach);
+
+    // The host sits in the page's own tree, so the wave can find the composer from it.
+    function playModeWave(next) {
+      // White, and red (flickering) whatever the preset while Evil Mode is on.
+      wave.play(permission.host, document.documentElement.hasAttribute('data-dsx-evil') ? 'danger' : 'light');
+    }
+
+    const menus = root.DsxMenus.createMenus({
+      icon: iconMarkup,
+      tooltip,
+      getState: () => current,
+      actions: {
+        selectMode: (next) => {
+          if (next === current.mode) return;
+          playModeWave(next);
+          onChangeMode(next);
+        },
+        selectWorkspace: (path) => onSelectWorkspace(path),
+        addWorkspace: () => onPickFolder(),
+        setThinking: (thinking) => onSetThinking(thinking),
+      },
+    });
+
+    // Marks which button holds a menu open, for its look and for screen readers.
+    const openers = { workspace: workspaceButton, permission: permissionButton, model: modelButton };
+    function syncExpanded() {
+      for (const [kind, button] of Object.entries(openers)) button.setAttribute('aria-expanded', String(menus.isOpen(kind)));
+    }
+
+    // Opens a menu on its button. A second click on the same button closes it. `onClose` is what
+    // happens after: by default the focus goes back to the composer when something was picked.
+    function openMenu(kind, host, onClose) {
+      if (menus.isOpen(kind)) {
+        menus.close('toggle');
+        return;
+      }
+      menus.open(kind, {
+        anchor: host,
+        box: kind === 'permission' ? findComposerBox(host) : null,
+        onClose: (reason) => {
+          syncExpanded();
+          if (onClose) onClose(reason);
+          else if (reason === 'pick' || reason === 'escape') {
+            const area = findComposerArea();
+            if (area) area.focus();
+          }
+        },
+      });
+      syncExpanded();
+    }
+
+    // The file dialog belongs to DeepSeek: its own attach button, or the file input behind it.
+    function openFileDialog() {
+      if (nativeAttach && nativeAttach.isConnected) {
+        nativeAttach.click();
+        return;
+      }
+      const input = document.querySelector('input[type="file"]');
+      if (input) input.click();
+    }
 
     // Page scripts can only produce untrusted events.
     const trusted = (handler) => (event) => {
       if (event.isTrusted) handler();
     };
-    folderButton.addEventListener('click', trusted(onPickFolder));
     evilButton.addEventListener('click', trusted(onToggleEvil));
     updateClose.addEventListener('click', trusted(() => onDismissUpdate(updateTag)));
-    permissionButton.addEventListener('click', trusted(() => {
-      const next = mode === 'bypass' ? 'ask' : 'bypass';
-      // The host sits in the page's own tree, so the wave can find the composer from it.
-      wave.play(permission.host, next === 'bypass' ? 'danger' : 'light');
-      onChangeMode(next);
-    }));
+    workspaceButton.addEventListener('click', trusted(() => openMenu('workspace', workspace.host)));
+    permissionButton.addEventListener('click', trusted(() => openMenu('permission', permission.host)));
+    modelButton.addEventListener('click', trusted(() => openMenu('model', model.host)));
+    attachButton.addEventListener('click', trusted(openFileDialog));
 
     function update({ alive, settings, hostInfo, hostError, picking, pickError, update: newerRelease, evilBusy }) {
-      mode = settings.mode;
+      const workspaces = Array.isArray(settings.workspaces) ? settings.workspaces : [];
+      current = {
+        mode: MODES.some((entry) => entry.id === settings.mode) ? settings.mode : 'ask',
+        cwd: settings.cwd || '',
+        workspaces,
+        thinking: settings.thinking !== false,
+      };
 
       // The link returns for the next release after the user closes this one. While it is hidden
       // it holds no text, so nothing is left behind in the page.
@@ -432,11 +603,13 @@
       statusLabel.textContent = `Shell · ${status}`;
       tips.pill = alive && !hostInfo ? ['Run node host/install.js, then restart the browser.', hostError].filter(Boolean).join('\n') : '';
 
-      const bypass = mode === 'bypass';
-      permissionButton.className = bypass ? 'danger' : '';
-      permissionButton.setAttribute('aria-label', `Permissions: ${bypass ? 'bypass' : 'manual'}`);
-      tips.permission = bypass ? 'Commands run without asking' : 'Commands ask before running';
-      permissionButton.innerHTML = `${iconMarkup(bypass ? 'bolt' : 'shield')}<span>${bypass ? 'Bypass' : 'Manual'}</span>`;
+      permissionButton.setAttribute('aria-label', `Permissions: ${modeLabel(current.mode)}`);
+      tips.permission = {
+        ask: 'Reads run by themselves in the workspace. Everything else asks first',
+        workspace: 'Reads and edits run by themselves in the workspace. Commands ask first',
+        bypass: 'Commands run without asking',
+      }[current.mode];
+      permissionButton.innerHTML = `${iconMarkup('shield')}<span>${modeLabel(current.mode)}</span>${chevron()}`;
 
       const evilOn = Boolean(settings.evilOn);
       evilButton.className = [evilOn ? 'on' : '', evilBusy ? 'busy' : ''].join(' ').trim();
@@ -444,10 +617,18 @@
       evilButton.setAttribute('aria-label', `Evil Mode: ${evilOn ? 'on' : 'off'}`);
       tips.evil = evilOn ? 'Evil Mode: on. Click to turn it off.' : 'Evil Mode: off. Click to turn it on.';
 
-      folderButton.className = [settings.cwd ? 'selected' : '', picking ? 'busy' : ''].join(' ').trim();
-      const location = settings.cwd || (hostInfo && hostInfo.home) || 'your home folder';
-      folderButton.setAttribute('aria-label', `Working directory: ${location}`);
-      tips.folder = pickError ? `Couldn't open the folder dialog: ${pickError}` : location;
+      workspaceButton.className = ['workspace', picking ? 'busy' : ''].join(' ').trim();
+      workspaceLabel.textContent = current.cwd ? basename(current.cwd) : DEFAULT_WORKSPACE;
+      const location = current.cwd || (hostInfo && hostInfo.home) || 'your home folder';
+      workspaceButton.setAttribute('aria-label', `Workspace: ${location}`);
+      tips.workspace = pickError ? `Couldn't open the folder dialog: ${pickError}` : location;
+
+      modelName.textContent = MODEL_NAME;
+      modelEffort.textContent = current.thinking ? 'On' : 'Off';
+      modelButton.setAttribute('aria-label', `Model: ${MODEL_NAME}, effort ${current.thinking ? 'on' : 'off'}`);
+
+      menus.refresh();
+      syncToggles();
       tooltip.refresh();
     }
 
@@ -469,7 +650,31 @@
       tooltip.refresh();
     }
 
+    // Clicks a native toggle until it matches what is wanted. A toggle that refuses is left alone
+    // after a few tries, so a page that locks it can never turn this into a loop.
+    function ensureToggle(key, toggle, wanted) {
+      if (!toggle) return;
+      if (toggle.classList.contains('ds-toggle-button--selected') === wanted) {
+        toggleSync.tries[key] = 0;
+        return;
+      }
+      const now = Date.now();
+      if (now - toggleSync.lastClick[key] < TOGGLE_CLICK_GAP_MS || toggleSync.tries[key] >= TOGGLE_MAX_TRIES) return;
+      toggleSync.lastClick[key] = now;
+      toggleSync.tries[key] += 1;
+      toggle.click();
+      // Looks again once the page has had time to react, in case nothing else changes on it.
+      setTimeout(syncToggles, TOGGLE_CLICK_GAP_MS + 50);
+    }
+
+    function syncToggles() {
+      ensureToggle('think', nativeToggles.think, current.thinking);
+      // Search is always on.
+      ensureToggle('search', nativeToggles.search, true);
+    }
+
     // React owns the group's children, so this only adds to it and never moves anything of React's.
+    // What it hides, it hides with an attribute, which page.css turns into display: none.
     function mount() {
       if (document.body && !pill.host.isConnected) document.body.append(pill.host);
       if (document.body && !tooltip.host.isConnected) document.body.append(tooltip.host);
@@ -478,24 +683,60 @@
       if (row) {
         if (!row.hasAttribute('data-dsx-row')) row.setAttribute('data-dsx-row', '');
         if (evil.host.parentElement !== row) row.append(evil.host);
+        const pill = markNewChatButton(row);
+        const look = pill && readNewChatLook(pill);
+        if (look) {
+          evil.host.style.setProperty('--dsx-bg', look.bg);
+          evil.host.style.setProperty('--dsx-radius', look.radius);
+          evil.host.style.setProperty('--dsx-color', look.color);
+          evil.host.style.setProperty('--dsx-shadow', look.shadow);
+        }
       }
       const group = findComposerToggleGroup();
       if (!group) return;
-      if (folder.host.parentElement !== group) group.prepend(folder.host);
+      if (attachment.host.parentElement !== group) group.prepend(attachment.host);
       if (permission.host.parentElement !== group) group.append(permission.host);
-      // The attach and send buttons sit in the next group of the same row. The meter goes before them.
+
+      nativeToggles = findNativeToggles(group);
+      for (const toggle of [nativeToggles.think, nativeToggles.search]) {
+        if (toggle && !toggle.hasAttribute('data-dsx-hidden')) toggle.setAttribute('data-dsx-hidden', '');
+      }
+
+      // The attach and send buttons sit in the next group of the same row. The meter and the model
+      // go before them, and DeepSeek's own attach button is hidden, because ours takes its place.
       const actions = group.nextElementSibling;
-      if (actions && meter.host.parentElement !== actions) actions.prepend(meter.host);
+      if (actions) {
+        if (model.host.parentElement !== actions) actions.prepend(model.host);
+        // The context meter is switched off for now. Remove the slashes to show it again.
+        // if (meter.host.parentElement !== actions) actions.prepend(meter.host);
+        const own = [...actions.children].filter((child) => child !== meter.host && child !== model.host);
+        nativeAttach = own.length >= 2 ? own[0] : null;
+        if (nativeAttach && !nativeAttach.hasAttribute('data-dsx-hidden')) nativeAttach.setAttribute('data-dsx-hidden', '');
+      }
+
+      // The workspace sits right above the composer's rounded box.
+      const box = findComposerBox(group);
+      if (box && box.parentElement && workspace.host.nextElementSibling !== box) box.parentElement.insertBefore(workspace.host, box);
+      syncToggles();
     }
 
-    // The same wave as a click on the button, for a mode changed some other way.
-    function playModeWave(next) {
-      wave.play(permission.host, next === 'bypass' ? 'danger' : 'light');
+    // The permission and model menus can also be opened from the slash menu. `onClose` runs when
+    // they close, and says why.
+    function openPermission(onClose) {
+      if (!permission.host.isConnected) return false;
+      if (!menus.isOpen('permission')) openMenu('permission', permission.host, onClose);
+      return true;
+    }
+
+    function openModel(onClose) {
+      if (!model.host.isConnected) return false;
+      if (!menus.isOpen('model')) openMenu('model', model.host, onClose);
+      return true;
     }
 
     setContext({ used: 0, limit: null });
 
-    return { update, mount, playModeWave, setContext };
+    return { update, mount, playModeWave, setContext, openPermission, openModel, openFileDialog, icon: iconMarkup };
   }
 
   root.DsxPageControls = { createPageControls, findComposerBox };

@@ -1,5 +1,5 @@
-// Slash commands in DeepSeek's composer: a suggestion menu while you type "/", Tab to complete, and
-// Enter to run. It draws the menu in DeepSeek's own dropdown style and handles the keys. What the
+// Slash commands in DeepSeek's composer: a menu of commands in groups while you type "/", Tab to
+// complete, and Enter to run. It draws the menu in DeepSeek's own dropdown style and handles the keys. What the
 // commands do is decided by the caller, and what the text means by lib/slash-match.js.
 //
 // Tab never moves focus out of the composer, so it can only complete. The menu and the keys react
@@ -15,41 +15,42 @@
     :host { position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 2147483000; }
     * { box-sizing: border-box; }
     .panel {
-      position: fixed; min-width: 240px; max-width: min(480px, calc(100vw - 16px)); padding: 4px; border-radius: 12px;
+      position: fixed; min-width: 240px; padding: 4px; border-radius: 16px;
       font-size: var(--ds-font-size-m, 14px); line-height: 24px;
       color: var(--dsw-alias-label-primary, #f9fafb);
       background-color: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-3, #2b2c2f));
       box-shadow: 0 0 1px rgba(0, 0, 0, .2), 0 0 4px rgba(0, 0, 0, .02), 0 12px 32px rgba(0, 0, 0, .08);
     }
     .panel[hidden] { display: none; }
-    .options { max-height: 304px; overflow-y: auto; scrollbar-width: thin; }
+    .options { max-height: 340px; overflow-y: auto; scrollbar-width: thin; }
+    .group { padding: 10px 10px 4px; font-size: var(--ds-font-size-s, 12px); line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-tertiary, #adb2b8); }
+    .group:first-child { padding-top: 6px; }
     .option {
-      display: flex; align-items: center; gap: 12px; min-height: 24px; padding: 8px 10px; border-radius: 8px;
+      display: flex; align-items: center; gap: 10px; min-height: 24px; padding: 8px 10px; border-radius: 8px;
       cursor: pointer; user-select: none; overflow: hidden;
       transition: background-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, cubic-bezier(.4, 0, .2, 1));
     }
     .option:hover, .option[aria-selected="true"] { background-color: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, .08)); }
-    .name { flex: none; min-width: 88px; font-weight: 500; white-space: nowrap; }
-    .desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary, #adb2b8); }
+    .option svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .name { flex: none; font-weight: 500; white-space: nowrap; }
+    .desc { flex: 1; min-width: 0; padding-left: 24px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ds-font-size-s, 13px); color: var(--dsw-alias-label-tertiary, #adb2b8); }
     .empty { padding: 8px 10px; color: var(--dsw-alias-label-tertiary, #adb2b8); }
-    .hint {
-      margin-top: 4px; padding: 6px 10px 4px; font-size: var(--ds-font-size-s, 12px); line-height: 18px;
-      color: var(--dsw-alias-label-caption, #81858c); border-top: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, .12));
-    }
     .message { padding: 6px 10px; cursor: pointer; }
     .message div { white-space: pre-wrap; overflow-wrap: anywhere; }
     .message.error { color: var(--dsw-alias-state-error-primary, #f25a5a); }
     .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     @media (prefers-reduced-motion: reduce) { .option { transition: none; } }
   `;
-  const HINT = '↑↓ to move · Tab to complete · Enter to run · Esc to close';
   const GAP_PX = 8;
   const MESSAGE_MS = 6000;
 
-  // `commands` is the list lib/slash-match.js understands. `run(name, argument)` carries a command out
-  // and may return { lines, error }, which is shown above the composer. `findBox(textarea)` returns
-  // the rounded box around the composer, which the menu sits on top of.
-  function createSlashCommands({ commands, run, findBox }) {
+  // `commands` is the list lib/slash-match.js understands. A command can have a `group` (the heading it
+  // is listed under), an `icon` and a `label` (the name as shown, otherwise the name), and `keepText`
+  // when it opens a menu of its own and the text stays in the composer until that menu closes.
+  // `run(name, argument)` carries a command out and may return { lines, error }, which is shown above
+  // the composer. `findBox(textarea)` returns the rounded box around the composer, which the menu sits
+  // on top of. `icon(name)` returns svg markup.
+  function createSlashCommands({ commands, run, findBox, icon }) {
     const host = document.createElement('dsx-commands');
     const shadow = host.attachShadow({ mode: 'closed' });
     const style = document.createElement('style');
@@ -60,10 +61,7 @@
     menu.hidden = true;
     const options = document.createElement('div');
     options.className = 'options';
-    const hint = document.createElement('div');
-    hint.className = 'hint';
-    hint.textContent = HINT;
-    menu.append(options, hint);
+    menu.append(options);
     const message = document.createElement('div');
     message.className = 'panel message';
     message.setAttribute('role', 'status');
@@ -100,7 +98,7 @@
       const rect = box.getBoundingClientRect();
       panel.style.left = `${Math.max(rect.left, GAP_PX)}px`;
       panel.style.bottom = `${Math.max(window.innerHeight - rect.top + GAP_PX, GAP_PX)}px`;
-      panel.style.width = `${Math.min(rect.width, 480)}px`;
+      panel.style.width = `${rect.width}px`;
     }
 
     function mount() {
@@ -131,13 +129,18 @@
       // What Tab and Enter do depends on the highlighted suggestion, so it is worked out again.
       const area = composer();
       if (area) current = plan(commands, area.value, index) || current;
-      [...options.children].forEach((node, position) => {
+      [...options.querySelectorAll('.option')].forEach((node, position) => {
         const selected = position === index;
         node.setAttribute('aria-selected', String(selected));
         if (selected) node.scrollIntoView({ block: 'nearest' });
       });
       const item = current.items[index];
-      announcer.textContent = `${item.name ? `/${item.name}` : item.value}, ${item.description}`;
+      announcer.textContent = `${displayName(item)}, ${item.description || ''}`;
+    }
+
+    function displayName(item) {
+      if (!item.name) return item.value;
+      return item.label || `${item.name.charAt(0).toUpperCase()}${item.name.slice(1)}`;
     }
 
     function optionNode(item, position) {
@@ -145,9 +148,14 @@
       node.className = 'option';
       node.setAttribute('role', 'option');
       node.setAttribute('aria-selected', String(position === index));
+      if (item.icon && icon) {
+        const holder = document.createElement('template');
+        holder.innerHTML = icon(item.icon);
+        node.append(holder.content);
+      }
       const name = document.createElement('span');
       name.className = 'name';
-      name.textContent = item.name ? `/${item.name}` : item.value;
+      name.textContent = displayName(item);
       const description = document.createElement('span');
       description.className = 'desc';
       description.textContent = item.description || '';
@@ -181,7 +189,18 @@
       hideMessage();
       options.replaceChildren();
       if (current.items.length) {
-        current.items.forEach((item, position) => options.append(optionNode(item, position)));
+        let group;
+        current.items.forEach((item, position) => {
+          // A heading each time the group changes.
+          if (item.group && item.group !== group) {
+            const heading = document.createElement('div');
+            heading.className = 'group';
+            heading.textContent = item.group;
+            options.append(heading);
+          }
+          group = item.group;
+          options.append(optionNode(item, position));
+        });
       } else {
         const none = document.createElement('div');
         none.className = 'empty';
@@ -212,7 +231,9 @@
 
     async function execute({ name, arg }) {
       const area = composer();
-      if (area) setText(area, '');
+      const command = commands.find((entry) => entry.name === name);
+      // A command that opens a menu of its own leaves the text until that menu closes.
+      if (area && !(command && command.keepText)) setText(area, '');
       hideMenu();
       try {
         const result = await run(name, arg);
@@ -222,10 +243,24 @@
       }
     }
 
-    // Tab: puts the highlighted suggestion in the composer.
+    // Tab: puts the highlighted suggestion in the composer. A command that opens a menu of its own
+    // (Permission, Model) opens it instead, since that is all there is left to complete.
     function complete() {
       const area = composer();
+      if (current && current.selected && current.selected.keepText && current.run) {
+        execute(current.run);
+        return;
+      }
       if (area && current && current.completion) setText(area, current.completion);
+    }
+
+    // Empties the composer when all it holds is a command word, such as after the menu a command
+    // opened closes, and puts the focus back there.
+    function clearCommandText(focus = true) {
+      const area = composer();
+      if (!area) return;
+      if (/^\/[a-z0-9-]*$/i.test(area.value)) setText(area, '');
+      if (focus) area.focus();
     }
 
     // Enter, or a click: runs the highlighted command, or completes it when it needs an argument.
@@ -291,7 +326,7 @@
       });
     }
 
-    return { start, showMessage };
+    return { start, showMessage, clearCommandText };
   }
 
   root.DsxSlashCommands = { createSlashCommands };

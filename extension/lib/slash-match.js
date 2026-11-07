@@ -1,7 +1,7 @@
 // Decides what the composer text means for slash commands. It only reads text: drawing the menu and
 // running the commands is done elsewhere, so this can be tested without a browser.
 //
-// A command is { name, description, args? }, where args is a list of { value, description }.
+// A command is { name, description, group?, args? }, where args is a list of { value, description }.
 (function (root) {
   'use strict';
 
@@ -27,6 +27,15 @@
     return [...starts, ...contains];
   }
 
+  // Commands may have a `group`, and the menu draws a heading for each. A filter can mix the groups
+  // up, so the items of one group are put back together, keeping their order and the order of the groups.
+  function groupTogether(items) {
+    const groups = [];
+    for (const item of items) if (!groups.includes(item.group)) groups.push(item.group);
+    if (groups.length < 2) return items;
+    return [...items].sort((a, b) => groups.indexOf(a.group) - groups.indexOf(b.group));
+  }
+
   function findCommand(commands, name) {
     return commands.find((command) => command.name === name) || null;
   }
@@ -41,7 +50,7 @@
   function plan(commands, text, index = 0) {
     const parsed = parse(text);
     if (parsed.kind === 'command') {
-      const items = filter(commands, parsed.query, 'name');
+      const items = groupTogether(filter(commands, parsed.query, 'name'));
       if (!items.length) return null;
       const selected = items[Math.min(Math.max(index, 0), items.length - 1)];
       const needsArgument = Boolean(selected.args && selected.args.length);
@@ -71,7 +80,7 @@
     return null;
   }
 
-  const api = { parse, filter, findCommand, plan };
+  const api = { parse, filter, groupTogether, findCommand, plan };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.DsxSlashMatch = api;

@@ -7,13 +7,20 @@
   const { createPageControls, findComposerBox } = globalThis.DsxPageControls;
   const { createThinkCollapser } = globalThis.DsxThinkCollapse;
   const { createSlashCommands } = globalThis.DsxSlashCommands;
+  const { modeLabel } = globalThis.DsxMenus;
 
+  // mode is the permission preset: 'ask' (Read Only), 'workspace' (Workspace Write) or 'bypass' (Full access).
+  // workspaces are the folders the user chose before, listed in the workspace menu; cwd is the current one.
+  // thinking is the Effort switch, which drives DeepSeek's DeepThink. Search is always on.
   // dismissedUpdate is the release tag whose notice the user closed.
   // evilOn: the user's own instructions, read from evil.txt, are added to the hidden prompt.
-  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', evilOn: false };
+  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', evilOn: false };
+  const MAX_WORKSPACES = 8;
   // Used only when the model leaves out the timeout it is asked to choose.
   const FALLBACK_TIMEOUT_SECONDS = 120;
   const READ_ONLY_TOOLS = new Set(['read', 'glob', 'grep']);
+  // What Workspace Write lets through by itself, when the file is inside the workspace.
+  const WORKSPACE_WRITE_TOOLS = new Set(['write', 'edit']);
   // A poll only reports on a job the user already approved, and a kill only stops one.
   const JOB_TOOLS = new Set(['poll', 'kill']);
   // Always asks first in Manual mode, even inside the working directory. Paths arrive with forward slashes.
@@ -62,7 +69,7 @@
 
   function pushConfig() {
     const env = hostInfo ? { ...hostInfo, cwd: settings.cwd, extra: settings.evilOn && extraPrompt ? extraPrompt.text : '' } : null;
-    postToPage({ type: 'config', env });
+    postToPage({ type: 'config', env, thinking: settings.thinking !== false });
   }
 
   // The user's own instructions, read from evil.txt by the host. Null until they are read.
@@ -103,28 +110,29 @@
   }
 
   // The red theme and the evil logos (evil.css, logos.css) show only while /evil is on, so turning it
-  // off brings the originals back. Turning it on plays the awakening animation first, which switches
-  // the look on itself at the right moment; the library is optional so a missing file only skips it.
+  // off brings the originals back. Turning it on or off plays the awakening animation, which switches
+  // the look at the right moment (syncEvilLook); the library is optional so a missing file only skips it.
   // The tougher greetings on an empty chat (evil-greeting.js) come and go with the look.
   const greeting = globalThis.DsxEvilGreeting
     ? globalThis.DsxEvilGreeting.createEvilGreeting()
     : { start() {}, stop() {} };
 
-  function showEvilLook() {
-    if (!settings.evilOn) return;
-    document.documentElement.setAttribute('data-dsx-evil', '');
-    greeting.start();
-  }
-
-  const awakening = globalThis.DsxEvilAwakening
-    ? globalThis.DsxEvilAwakening.createEvilAwakening({ onActivate: showEvilLook })
-    : { play: showEvilLook, isPlaying: () => false };
-
-  function applyEvilLook() {
-    if (settings.evilOn && awakening.isPlaying()) return;
+  // Puts the page in the look the setting asks for. The animation calls this under its glitch, so it
+  // reads the setting at that moment and works the same way for turning the look on and off.
+  function syncEvilLook() {
     document.documentElement.toggleAttribute('data-dsx-evil', Boolean(settings.evilOn));
     if (settings.evilOn) greeting.start();
     else greeting.stop();
+  }
+
+  const awakening = globalThis.DsxEvilAwakening
+    ? globalThis.DsxEvilAwakening.createEvilAwakening({ onActivate: syncEvilLook })
+    : { play: syncEvilLook, isPlaying: () => false };
+
+  // While the animation plays it decides when the look changes, so a settings change in between waits.
+  function applyEvilLook() {
+    if (awakening.isPlaying()) return;
+    syncEvilLook();
   }
 
   chrome.storage.local.get(DEFAULT_SETTINGS).then((stored) => {
@@ -338,7 +346,7 @@
       runCommand(id);
       return;
     }
-    if (!isBypassed(tool)) return;
+    if (!isBypassed(tool) && !isWorkspaceWrite(tool)) return;
 
     if (READ_ONLY_TOOLS.has(tool.kind)) {
       runCommand(id, { autoRun: true });
@@ -365,7 +373,18 @@
 
   // Reading sends file contents to DeepSeek, so it only runs unasked inside a folder the user chose.
   function isSafeRead(tool) {
-    if (!READ_ONLY_TOOLS.has(tool.kind) || !settings.cwd) return false;
+    return READ_ONLY_TOOLS.has(tool.kind) && insideWorkspace(tool);
+  }
+
+  // Workspace Write: writes and edits inside the chosen folder run by themselves. Commands never do,
+  // because a command can reach anywhere, and sensitive files always ask.
+  function isWorkspaceWrite(tool) {
+    return settings.mode === 'workspace' && WORKSPACE_WRITE_TOOLS.has(tool.kind) && insideWorkspace(tool);
+  }
+
+  // The tool's path is inside the folder the user chose, and is not a sensitive file.
+  function insideWorkspace(tool) {
+    if (!settings.cwd) return false;
     const target = tool.path || '';
     const normalize = (value) => {
       const clean = value.replace(/[\\/]+/g, '/').replace(/\/$/, '');
@@ -703,13 +722,19 @@
     if (message.id !== folderRequest) return;
     folderRequest = null;
     folderError = message.error;
-    if (message.path) saveSettings({ cwd: message.path });
+    if (message.path) {
+      // The newest folder goes first in the workspace list, once.
+      const others = (settings.workspaces || []).filter((path) => !globalThis.DsxMenus.samePath(path, message.path));
+      saveSettings({ cwd: message.path, workspaces: [message.path, ...others].slice(0, MAX_WORKSPACES) });
+    }
     renderControls();
   }
 
   const controls = createPageControls({
     onPickFolder: startFolderPick,
     onChangeMode: (mode) => saveSettings({ mode }),
+    onSelectWorkspace: (cwd) => saveSettings({ cwd }),
+    onSetThinking: (thinking) => saveSettings({ thinking }),
     onDismissUpdate: (tag) => saveSettings({ dismissedUpdate: tag }),
     onToggleEvil: toggleEvilFromButton,
   });
@@ -788,8 +813,11 @@
   async function toggleEvil() {
     if (settings.evilOn) {
       saveSettings({ evilOn: false });
+      settings.evilOn = false;
       extraPrompt = null;
       pushConfig();
+      // The same animation as turning it on: it brings the original look back under its glitch.
+      awakening.play();
       // Turning it off says nothing: the button and the original look already show it.
       return { lines: [] };
     }
@@ -803,45 +831,74 @@
     return { lines: answer.text.length > LONG_PROMPT_CHARS ? [`On: ${describePromptSize(answer.text)} from evil.txt.`] : [] };
   }
 
+  // The menu: three groups. Only commands that work are listed.
+  const FEEDBACK_URL = 'https://github.com/ItsDaxi/deepseek-web-agent/issues/new';
+
   const SLASH_COMMANDS = [
     {
-      name: 'help',
-      description: 'Show the available commands',
+      name: 'file',
+      group: 'Add',
+      icon: 'paperclip',
+      description: '',
+      run: () => {
+        controls.openFileDialog();
+        return { lines: [] };
+      },
+    },
+    {
+      name: 'feedback',
+      group: 'Add',
+      icon: 'send',
+      description: 'Record feedback about this session',
+      run: () => {
+        // Opens the issue page of the project in a new tab. Nothing is sent from here.
+        window.open(FEEDBACK_URL, '_blank', 'noopener,noreferrer');
+        return { lines: [] };
+      },
+    },
+    {
+      name: 'permission',
+      group: 'Commands',
+      icon: 'shield',
+      description: 'Switch the permission preset (sandbox mode + approval policy)',
+      keepText: true,
+      run: () => {
+        controls.openPermission(() => slashCommands.clearCommandText());
+        return { lines: [] };
+      },
+    },
+    {
+      name: 'model',
+      group: 'Commands',
+      icon: 'database',
+      description: 'Select the model for this conversation',
+      keepText: true,
+      run: () => {
+        controls.openModel(() => slashCommands.clearCommandText());
+        return { lines: [] };
+      },
+    },
+    {
+      name: 'status',
+      group: 'Skills',
+      icon: 'info',
+      description: 'Show the connection, permissions and workspace',
       run: () => ({
-        lines: SLASH_COMMANDS.map((command) => {
-          const options = command.args ? ` ${command.args.map((arg) => arg.value).join('|')}` : '';
-          return `/${command.name}${options}: ${command.description}`;
-        }),
+        lines: [
+          `Extension: v${chrome.runtime.getManifest().version}${updateInfo ? ` (${updateInfo.tag} is available)` : ''}`,
+          `Shell host: ${hostInfo ? `connected, ${hostInfo.defaultShell}` : 'not connected'}`,
+          `Permissions: ${modeLabel(settings.mode)}`,
+          `Workspace: ${settings.cwd || (hostInfo && hostInfo.home) || 'not set'}`,
+          `Effort: ${settings.thinking === false ? 'off' : 'on'}`,
+          `Thinking blocks: ${settings.collapseThinking === false ? 'left as DeepSeek shows them' : 'kept collapsed'}`,
+          `Your instructions (evil.txt): ${settings.evilOn ? (extraPrompt ? `on, ${extraPrompt.text.length} characters` : 'on, not read yet') : 'off'}`,
+        ],
       }),
     },
     {
-      name: 'mode',
-      description: 'Switch between manual and bypass',
-      // Manual comes first, so a careless Enter right after "/mode " picks the safe one.
-      args: [
-        { value: 'manual', description: 'Ask before every command' },
-        { value: 'bypass', description: 'Run commands without asking' },
-      ],
-      run: (arg) => {
-        if (arg !== 'manual' && arg !== 'bypass') return { error: true, lines: ['Use /mode manual or /mode bypass.'] };
-        const next = arg === 'bypass' ? 'bypass' : 'ask';
-        if (settings.mode === next) return { lines: [`Already in ${arg} mode.`] };
-        controls.playModeWave(next);
-        saveSettings({ mode: next });
-        return { lines: [next === 'bypass' ? 'Bypass: commands now run without asking.' : 'Manual: commands now ask before running.'] };
-      },
-    },
-    {
-      name: 'cd',
-      description: 'Choose the working folder',
-      run: () => {
-        if (!port || !hostInfo) return { error: true, lines: ['The shell host is not connected.'] };
-        startFolderPick();
-        return { lines: ['Choose a folder in the dialog that opened.'] };
-      },
-    },
-    {
       name: 'thinking',
+      group: 'Skills',
+      icon: 'bolt',
       description: 'Keep the thinking blocks collapsed or not',
       args: [
         { value: 'collapse', description: 'Keep them collapsed' },
@@ -854,21 +911,9 @@
       },
     },
     {
-      name: 'status',
-      description: 'Show the connection, mode and folder',
-      run: () => ({
-        lines: [
-          `Extension: v${chrome.runtime.getManifest().version}${updateInfo ? ` (${updateInfo.tag} is available)` : ''}`,
-          `Shell host: ${hostInfo ? `connected, ${hostInfo.defaultShell}` : 'not connected'}`,
-          `Mode: ${settings.mode === 'bypass' ? 'bypass' : 'manual'}`,
-          `Folder: ${settings.cwd || (hostInfo && hostInfo.home) || 'not set'}`,
-          `Thinking blocks: ${settings.collapseThinking === false ? 'left as DeepSeek shows them' : 'kept collapsed'}`,
-          `Your instructions (evil.txt): ${settings.evilOn ? (extraPrompt ? `on, ${extraPrompt.text.length} characters` : 'on, not read yet') : 'off'}`,
-        ],
-      }),
-    },
-    {
       name: 'evil',
+      group: 'Skills',
+      icon: 'flame',
       description: 'Turn your own instructions from evil.txt on or off',
       // One command, no arguments: it switches. The file is read when it is turned on and again every
       // time the page loads, so an edit takes effect after a reload. Its text is never printed back.
@@ -876,6 +921,8 @@
     },
     {
       name: 'update',
+      group: 'Skills',
+      icon: 'arrowUp',
       description: 'Look for a new version now',
       run: () => new Promise((resolve) => {
         if (!port) {
@@ -894,12 +941,25 @@
         port.postMessage({ type: 'check-update', force: true });
       }),
     },
+    {
+      name: 'help',
+      group: 'Skills',
+      icon: 'help',
+      description: 'Show the available commands',
+      run: () => ({
+        lines: SLASH_COMMANDS.map((command) => {
+          const options = command.args ? ` ${command.args.map((arg) => arg.value).join('|')}` : '';
+          return `/${command.name}${options}${command.description ? `: ${command.description}` : ''}`;
+        }),
+      }),
+    },
   ];
 
   const slashCommands = createSlashCommands({
     commands: SLASH_COMMANDS,
     run: (name, arg) => SLASH_COMMANDS.find((command) => command.name === name).run(arg),
     findBox: findComposerBox,
+    icon: controls.icon,
   });
   slashCommands.start();
 

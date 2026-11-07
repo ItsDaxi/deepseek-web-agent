@@ -27,7 +27,7 @@
   const ENTER_ATTEMPTS = 3;
   const TITLE_MAX_CHARS = 40;
 
-  const config = { env: null };
+  const config = { env: null, thinking: null };
   const requests = new WeakMap();
   const pendingResults = new Map();
   // The instructions already sent in each chat, by session id.
@@ -79,7 +79,11 @@
       return rawBody;
     }
     request.sessionId = body.chat_session_id;
-    if (typeof body.prompt !== 'string') return rawBody;
+    // The Effort switch decides DeepThink, and Search is always on. The page's own buttons are kept in
+    // step with this by the content script, so this only matters when they could not be.
+    if (typeof config.thinking === 'boolean' && 'thinking_enabled' in body) body.thinking_enabled = config.thinking;
+    if ('search_enabled' in body) body.search_enabled = true;
+    if (typeof body.prompt !== 'string') return JSON.stringify(body);
 
     const marker = RESULT_MARKER.exec(body.prompt.trim());
     if (marker && pendingResults.has(marker[1])) {
@@ -366,6 +370,7 @@
     const message = event.data;
     if (message.type === 'config') {
       config.env = message.env;
+      config.thinking = typeof message.thinking === 'boolean' ? message.thinking : null;
     } else if (message.type === 'send-result') {
       const body = Protocol.buildResultMessage({ id: message.id, ...message.result });
       pendingResults.set(message.id, Protocol.injectPrompt(body, config.env, { full: false }));
