@@ -6,9 +6,6 @@ host/com.dsx.shell_host.json
 # The built setup, which bundles the Node.js runtime.
 dist/
 
-# The user's own instructions for the model, read by /evil. They are personal and stay on the machine.
-/evil.txt
-
 # Saved copies of the DeepSeek page, kept only as a reference for its styling. They hold the
 # page's own code and whatever was on screen when it was saved, so they never go in the repository.
 /DeepSeek - *

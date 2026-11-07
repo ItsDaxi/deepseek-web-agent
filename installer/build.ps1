@@ -82,6 +82,10 @@ Write-Icon $icon
 
 Copy-Item (Join-Path $root 'extension') (Join-Path $work 'payload\extension') -Recurse
 foreach ($file in 'host.js', 'tools.js', 'pick-folder.ps1') { Copy-Item (Join-Path $root "host\$file") (Join-Path $work 'payload\host') }
+# The instructions /evil reads ship with the setup, which puts them beside host and extension.
+$evilText = Join-Path $root 'evil.txt'
+if (-not (Test-Path $evilText)) { throw "evil.txt is missing from $root, so the setup would ship without it." }
+Copy-Item $evilText (Join-Path $work 'payload\evil.txt')
 Copy-Item $NodeExe (Join-Path $work 'payload\runtime\node.exe')
 $nodeLicense = Join-Path (Split-Path $NodeExe) 'LICENSE'
 if (Test-Path $nodeLicense) { Copy-Item $nodeLicense (Join-Path $work 'payload\runtime\LICENSE') }

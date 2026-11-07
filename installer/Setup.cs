@@ -148,6 +148,8 @@ namespace DsxSetup
                     if (string.IsNullOrEmpty(entry.Name)) continue;
                     string target = Path.GetFullPath(Path.Combine(AppDir, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
                     if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+                    // evil.txt is the user's to edit, so an update only puts the shipped one where there is none.
+                    if (entry.FullName == "evil.txt" && File.Exists(target)) continue;
                     Directory.CreateDirectory(Path.GetDirectoryName(target));
                     using (Stream source = entry.Open())
                     using (FileStream output = File.Create(target))
