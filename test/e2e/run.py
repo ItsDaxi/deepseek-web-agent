@@ -452,7 +452,7 @@ def run(context, server):
     wait_until(lambda: not page.evaluate("document.querySelector('#composer')?.hasAttribute('data-dsx-sending')"), message="composer free")
 
     # The model panel also shows how much of the context window the chat has used.
-    page.evaluate("(id) => { window.postMessage({source:'dsx-page', type:'context-limit', tokens: 1000000}, location.origin); window.postMessage({source:'dsx-page', type:'usage', sessionId: id, tokens: 212000}, location.origin); }", SESSION_ID)
+    page.evaluate("(id) => { window.postMessage({source:'dsx-page', type:'context-limit', tokens: 890880}, location.origin); window.postMessage({source:'dsx-page', type:'usage', sessionId: id, tokens: 212000}, location.origin); }", SESSION_ID)
     pause(0.5)
     shadow.click_last("model-menu")
     check("the model panel shows the context used against the limit", wait_until(lambda: "Context" in shadow.text() and "212K / 1M" in shadow.text(), message="context row"), shadow.text()[-200:])

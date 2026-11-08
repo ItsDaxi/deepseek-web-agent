@@ -35,6 +35,10 @@
   const RECONNECT_MS = 1000;
   const HOST_RETRY_MS = 5000;
   const OUTPUT_LIMIT_CHARS = 512 * 1024;
+  // What the context meter counts against. The limit in DeepSeek's model settings (about 890K) is the
+  // most the page accepts in one message, not the size of the model's window, which is taken as 1M. If the
+  // settings ever name a bigger limit, that one is used.
+  const CONTEXT_WINDOW_TOKENS = 1000000;
 
   let settings = { ...DEFAULT_SETTINGS };
   let hostInfo = null;
@@ -52,9 +56,9 @@
   let turn = null;
   const allowedChats = new Set();
   // The context meter. DeepSeek counts the tokens of each chat and says so at the end of every reply
-  // and in the history of a chat. Nothing is counted here. contextLimit is the most a chat can hold.
+  // and in the history of a chat. Nothing is counted here. contextLimit is what the meter counts against.
   const chatTokens = new Map();
-  let contextLimit = null;
+  let contextLimit = CONTEXT_WINDOW_TOKENS;
   let shownContext = '';
   const WAITING = 'Waiting for the commands before it to finish.';
 
@@ -647,7 +651,7 @@
         renderContext();
         break;
       case 'context-limit':
-        contextLimit = message.tokens;
+        contextLimit = Math.max(message.tokens, CONTEXT_WINDOW_TOKENS);
         renderContext();
         break;
       case 'result-failed':

@@ -78,7 +78,7 @@ All controls sit in the composer of the DeepSeek page. The extension has no tool
 - The permission button (**Read Only**, **Workspace Write**, **Full access**) opens a menu of presets. A short pixel wave crosses the composer when you change it: white, or red and flickering while Evil Mode is on, whatever the preset.
 - The model button opens a small panel. The model is fixed. **Effort** is on or off and works exactly like DeepSeek's DeepThink button, which the extension hides and drives for you. Search is always on, and its button is hidden too. "Enable agent teamwork" is not built yet and cannot be clicked.
 - "Thought for N seconds" blocks are kept collapsed. Click one to read it, and it stays open. To stop this, run `chrome.storage.local.set({ collapseThinking: false })` in the extension's service worker console.
-- The model panel (click the model name above the send button) has a Context row: the tokens the chat has used against the model's limit, like `212K / 1M`, with a thin bar that turns amber and then red as it fills. It updates at the end of every reply, with the total DeepSeek counts.
+- The model panel (click the model name above the send button) has a Context row: the tokens the chat has used against the model's 1M-token window, like `212K / 1M`, with a thin bar that turns amber and then red as it fills. It updates at the end of every reply, with the total DeepSeek counts.
 - Each thinking block shows how many tokens the model spent reasoning, counted live as it streams (`1.2K tokens`). DeepSeek sends the reasoning one token per chunk, so the count is exact; blocks from an earlier visit show none.
 
 The model chooses the timeout of each command, up to 600 seconds.
@@ -204,6 +204,8 @@ npm run test:e2e
 ```
 
 The end-to-end test needs Python with Playwright and its Chromium. It loads the real extension and the real native host against a mock of DeepSeek (`test/e2e/mock-deepseek.html`). It registers the host for Playwright's Chromium only, and removes that registration when it ends. It does not touch the real site. Tests that open the real folder dialog on your screen only run with `DSX_TEST_DIALOG=1`.
+
+`test/manual/context-probe.js` is not a test but a measurement. The limit in the model panel comes from the page's model settings, which is not a promise about the real context window. The probe sends one message of about 1,000,000 tokens from your own page, with five codes hidden in it, and reports what DeepSeek counted, whether it refused the message, and which codes the model could read back. The steps to run it are at the top of the file. It uses your account: only run it when you want that.
 
 ## Uninstall
 
