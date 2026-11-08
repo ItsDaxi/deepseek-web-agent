@@ -12,6 +12,20 @@ The hidden prompt is added to outgoing requests and removed from the history aga
 
 Developed and tested on Windows with Brave and Chromium. It should work in Chrome and Edge. macOS and Linux are supported by the host but have had much less use.
 
+## Screenshots
+
+The controls sit in the page's own composer: the workspace above it, the permission preset and the model panel inside it, and the connection pill at the top right.
+
+![The DeepSeek chat with the extension's controls in the composer](docs/home.png)
+
+A tool call shows up as a card between the thinking block and the answer. The thinking header carries the live token count.
+
+![A write call shown as a card, with the model's answer below it](docs/tool-call.png)
+
+Evil Mode, turned on with `/evil`, gives the page a red look and adds your own instructions from `evil.txt` to the hidden prompt.
+
+![The same page in Evil Mode](docs/evil-mode.png)
+
 ## Install on Windows
 
 Download `DeepSeekWebAgentSetup.exe` from the [latest release](https://github.com/ItsDaxi/deepseek-web-agent/releases/latest) and run it. It needs no admin rights and no Node.js, and installs into your user folder. You can remove it from Installed apps in Windows Settings.
