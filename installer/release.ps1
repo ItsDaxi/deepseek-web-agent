@@ -1,5 +1,6 @@
 # Publishes a release in one command: raises the version, runs the tests, builds the setup, commits,
-# pushes, and creates the GitHub release with the setup attached.
+# pushes, and creates the GitHub release with the setup attached. If dist\<version>\dsx-<version>-firefox.xpi
+# exists (the package signed by Mozilla), it is attached too.
 #
 #   powershell -ExecutionPolicy Bypass -File installer/release.ps1 -Version 0.2.0
 #
@@ -25,7 +26,12 @@ $repo = 'ItsDaxi/deepseek-web-agent'
 $tag = "v$Version"
 $manifestPath = Join-Path $root 'extension\manifest.json'
 $packagePath = Join-Path $root 'package.json'
-$installer = Join-Path $root 'dist\DeepSeekWebAgentSetup.exe'
+# Everything a release makes goes in dist\<version>, named dsx-<version>-<what>.
+$releaseDir = Join-Path $root "dist\$Version"
+$installerName = "dsx-$Version-setup.exe"
+$installer = Join-Path $releaseDir $installerName
+$firefoxName = "dsx-$Version-firefox.xpi"
+$firefox = Join-Path $releaseDir $firefoxName
 
 # Native commands report failure through their exit code, and git writes warnings to stderr that
 # must not stop the script, so each one runs through this.
@@ -97,6 +103,7 @@ try {
   Write-Step 'Building the setup'
   Invoke-Checked 'The build' { powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build.ps1') }
   if (-not (Test-Path $installer)) { throw "The build did not produce $installer." }
+  Invoke-Checked 'The Firefox package' { node (Join-Path $PSScriptRoot 'build-firefox.js') }
   $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()
   $nodeVersion = (node --version)
   Write-Output "SHA-256: $hash"
@@ -113,7 +120,7 @@ try {
   $tick = [char]96
   $notes = @(
     '## What changed', '', $list, '',
-    "Windows setup for the extension and its native host. It needs no admin rights and no Node.js (a copy of Node.js $nodeVersion is bundled), and installs into your user folder. Run it over an older install to update it, then reload the extension in your browser.",
+    "$tick$installerName$tick is the Windows setup for the extension and its native host, for Chromium browsers and Firefox. It needs no admin rights and no Node.js (a copy of Node.js $nodeVersion is bundled), and installs into your user folder. Run it over an older install to update it, then reload the extension in your browser.",
     '',
     'The setup is not signed, so SmartScreen may warn you. Choose More info, then Run anyway, if you trust where you got it. You can check the download against this SHA-256:',
     '', "$tick$hash$tick", '',
@@ -141,13 +148,15 @@ try {
   Invoke-Checked 'git push' { git push origin main }
 
   Write-Step "Publishing $tag"
-  Invoke-Checked 'gh release create' { & $gh release create $tag $installer --repo $repo --target main --title $tag --notes-file $notesPath }
+  $assets = @($installer)
+  if (Test-Path $firefox) { $assets += $firefox } else { Write-Output "No signed Firefox package at $firefox, so the release has the setup only." }
+  Invoke-Checked 'gh release create' { & $gh release create $tag @assets --repo $repo --target main --title $tag --notes-file $notesPath }
 
   Write-Step 'Checking the upload'
   $check = Join-Path $env:TEMP "dsx-release-check-$Version"
   New-Item -ItemType Directory -Force $check | Out-Null
-  Invoke-Checked 'gh release download' { & $gh release download $tag --repo $repo --pattern 'DeepSeekWebAgentSetup.exe' --dir $check --clobber }
-  $remoteHash = (Get-FileHash (Join-Path $check 'DeepSeekWebAgentSetup.exe') -Algorithm SHA256).Hash.ToLower()
+  Invoke-Checked 'gh release download' { & $gh release download $tag --repo $repo --pattern $installerName --dir $check --clobber }
+  $remoteHash = (Get-FileHash (Join-Path $check $installerName) -Algorithm SHA256).Hash.ToLower()
   Remove-Item $check -Recurse -Force
   if ($remoteHash -ne $hash) { throw "The uploaded file does not match the build (local $hash, uploaded $remoteHash)." }
   Write-Output "Uploaded file matches the build. https://github.com/$repo/releases/tag/$tag"

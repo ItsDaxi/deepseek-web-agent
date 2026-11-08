@@ -67,6 +67,8 @@ namespace DsxSetup
         public const string AppName = "DeepSeek Web Agent";
         const string HostName = "com.dsx.shell_host";
         const string ExtensionId = "hacpjcoldiccblakbdgcnccmlehckaek";
+        // Firefox names the allowed extension by the id in its manifest instead of by a key.
+        const string GeckoId = "deepseek-web-agent@itsdaxi";
         // This key and the folder name below keep the old product name, so a setup run over an older
         // install updates it in place and one uninstall entry never turns into two.
         const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\DeepSeekShellTool";
@@ -78,6 +80,7 @@ namespace DsxSetup
             @"Software\Chromium\NativeMessagingHosts\" + HostName,
             @"Software\Microsoft\Edge\NativeMessagingHosts\" + HostName,
         };
+        const string FirefoxHostKey = @"Software\Mozilla\NativeMessagingHosts\" + HostName;
 
         static string LocalAppData { get { return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData); } }
 
@@ -97,11 +100,14 @@ namespace DsxSetup
             string launcher = Path.Combine(AppDir, "run-host.cmd");
             File.WriteAllText(launcher, "@echo off\r\n\"%~dp0runtime\\node.exe\" \"%~dp0host\\host.js\"\r\n", new ASCIIEncoding());
             string manifest = Path.Combine(AppDir, HostName + ".json");
-            File.WriteAllText(manifest, BuildHostManifest(launcher), new UTF8Encoding(false));
+            File.WriteAllText(manifest, BuildHostManifest(launcher, "allowed_origins", "chrome-extension://" + ExtensionId + "/"), new UTF8Encoding(false));
             foreach (string key in HostKeys)
             {
                 using (RegistryKey created = Registry.CurrentUser.CreateSubKey(key)) created.SetValue("", manifest);
             }
+            string firefoxManifest = Path.Combine(AppDir, HostName + ".firefox.json");
+            File.WriteAllText(firefoxManifest, BuildHostManifest(launcher, "allowed_extensions", GeckoId), new UTF8Encoding(false));
+            using (RegistryKey created = Registry.CurrentUser.CreateSubKey(FirefoxHostKey)) created.SetValue("", firefoxManifest);
 
             progress(95, "Adding it to Windows");
             RegisterUninstaller();
@@ -112,6 +118,7 @@ namespace DsxSetup
         {
             StopRunningHosts();
             foreach (string key in HostKeys) Registry.CurrentUser.DeleteSubKeyTree(key, false);
+            Registry.CurrentUser.DeleteSubKeyTree(FirefoxHostKey, false);
             Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
 
             if (Application.ExecutablePath.StartsWith(AppDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
@@ -162,10 +169,11 @@ namespace DsxSetup
             }
         }
 
-        static string BuildHostManifest(string launcher)
+        // `allowedField` is allowed_origins for Chromium browsers and allowed_extensions for Firefox.
+        static string BuildHostManifest(string launcher, string allowedField, string allowed)
         {
             return "{\n  \"name\": \"" + HostName + "\",\n  \"description\": \"" + AppName + " native host\",\n  \"path\": \""
-                + launcher.Replace("\\", "\\\\") + "\",\n  \"type\": \"stdio\",\n  \"allowed_origins\": [\"chrome-extension://" + ExtensionId + "/\"]\n}\n";
+                + launcher.Replace("\\", "\\\\") + "\",\n  \"type\": \"stdio\",\n  \"" + allowedField + "\": [\"" + allowed + "\"]\n}\n";
         }
 
         // The version the extension carries, so Installed apps always shows what was really installed.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Registers (or removes) the native messaging host for the current user.
-// Usage: node host/install.js [--uninstall] [--browsers chrome,brave,chromium,edge]
+// Usage: node host/install.js [--uninstall] [--browsers chrome,brave,chromium,edge,firefox]
 'use strict';
 
 const { execFileSync } = require('child_process');
@@ -15,6 +15,7 @@ const EXTENSION_MANIFEST = path.join(HOST_DIR, '..', 'extension', 'manifest.json
 
 const CHROME_KEY = 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts';
 const CHROMIUM_KEY = 'HKCU\\Software\\Chromium\\NativeMessagingHosts';
+const FIREFOX_KEY = 'HKCU\\Software\\Mozilla\\NativeMessagingHosts';
 
 // Brave has no registry path of its own on Windows: its binary only knows the Chromium and Chrome ones.
 const WINDOWS_KEYS = {
@@ -22,6 +23,7 @@ const WINDOWS_KEYS = {
   brave: [CHROMIUM_KEY, CHROME_KEY],
   chromium: [CHROMIUM_KEY],
   edge: ['HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts'],
+  firefox: [FIREFOX_KEY],
 };
 
 const home = os.homedir();
@@ -31,12 +33,14 @@ const POSIX_DIRS = {
     brave: `${home}/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts`,
     chromium: `${home}/Library/Application Support/Chromium/NativeMessagingHosts`,
     edge: `${home}/Library/Application Support/Microsoft Edge/NativeMessagingHosts`,
+    firefox: `${home}/Library/Application Support/Mozilla/NativeMessagingHosts`,
   },
   linux: {
     chrome: `${home}/.config/google-chrome/NativeMessagingHosts`,
     brave: `${home}/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts`,
     chromium: `${home}/.config/chromium/NativeMessagingHosts`,
     edge: `${home}/.config/microsoft-edge/NativeMessagingHosts`,
+    firefox: `${home}/.mozilla/native-messaging-hosts`,
   },
 };
 
@@ -46,6 +50,23 @@ function extensionId() {
   return [...digest.subarray(0, 16)]
     .map((byte) => String.fromCharCode(97 + (byte >> 4)) + String.fromCharCode(97 + (byte & 15)))
     .join('');
+}
+
+// Firefox identifies an extension by the id in its manifest, not by a key.
+function geckoId() {
+  const { browser_specific_settings: settings } = JSON.parse(fs.readFileSync(EXTENSION_MANIFEST, 'utf8'));
+  return settings.gecko.id;
+}
+
+// The two engines name the allowed extension differently, so Firefox gets a manifest of its own.
+function buildHostManifest(browser, launcher) {
+  const base = { name: HOST_NAME, description: 'DeepSeek Web Agent native host', path: launcher, type: 'stdio' };
+  if (browser === 'firefox') return { ...base, allowed_extensions: [geckoId()] };
+  return { ...base, allowed_origins: [`chrome-extension://${extensionId()}/`] };
+}
+
+function manifestFileName(browser) {
+  return browser === 'firefox' ? `${HOST_NAME}.firefox.json` : `${HOST_NAME}.json`;
 }
 
 function writeLauncher() {
@@ -61,21 +82,8 @@ function writeLauncher() {
   return launcher;
 }
 
-function writeHostManifest(launcher, target) {
-  fs.writeFileSync(
-    target,
-    JSON.stringify(
-      {
-        name: HOST_NAME,
-        description: 'DeepSeek Web Agent native host',
-        path: launcher,
-        type: 'stdio',
-        allowed_origins: [`chrome-extension://${extensionId()}/`],
-      },
-      null,
-      2,
-    ),
-  );
+function writeHostManifest(browser, launcher, target) {
+  fs.writeFileSync(target, JSON.stringify(buildHostManifest(browser, launcher), null, 2));
 }
 
 function selectedBrowsers() {
@@ -85,9 +93,10 @@ function selectedBrowsers() {
 }
 
 function installWindows(browsers) {
-  const manifest = path.join(HOST_DIR, `${HOST_NAME}.json`);
-  writeHostManifest(writeLauncher(), manifest);
+  const launcher = writeLauncher();
   for (const browser of browsers) {
+    const manifest = path.join(HOST_DIR, manifestFileName(browser));
+    writeHostManifest(browser, launcher, manifest);
     for (const parent of WINDOWS_KEYS[browser]) {
       const key = `${parent}\\${HOST_NAME}`;
       execFileSync('reg', ['add', key, '/ve', '/t', 'REG_SZ', '/d', manifest, '/f'], { stdio: 'ignore' });
@@ -115,7 +124,7 @@ function installPosix(browsers) {
   const launcher = writeLauncher();
   for (const browser of browsers) {
     fs.mkdirSync(dirs[browser], { recursive: true });
-    writeHostManifest(launcher, path.join(dirs[browser], `${HOST_NAME}.json`));
+    writeHostManifest(browser, launcher, path.join(dirs[browser], `${HOST_NAME}.json`));
     console.log(`Registered for ${browser}`);
   }
 }
@@ -127,11 +136,16 @@ function uninstallPosix(browsers) {
   }
 }
 
-const browsers = selectedBrowsers();
-const uninstall = process.argv.includes('--uninstall');
-if (process.platform === 'win32') {
-  (uninstall ? uninstallWindows : installWindows)(browsers);
-} else {
-  (uninstall ? uninstallPosix : installPosix)(browsers);
+function main() {
+  const browsers = selectedBrowsers();
+  const uninstall = process.argv.includes('--uninstall');
+  if (process.platform === 'win32') {
+    (uninstall ? uninstallWindows : installWindows)(browsers);
+  } else {
+    (uninstall ? uninstallPosix : installPosix)(browsers);
+  }
+  console.log(uninstall ? 'Native host removed.' : `Native host installed for extension ${extensionId()} and ${geckoId()}.`);
 }
-console.log(uninstall ? 'Native host removed.' : `Native host installed for extension ${extensionId()}.`);
+
+if (require.main === module) main();
+else module.exports = { buildHostManifest, manifestFileName, extensionId, geckoId };

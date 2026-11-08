@@ -1,6 +1,6 @@
 # DeepSeek Web Agent
 
-A Chromium extension that lets the [DeepSeek web chat](https://chat.deepseek.com) read and edit files and run commands on your computer. It works with the free chat on the website. There is no API key and nothing to pay for.
+A browser extension, for Chromium browsers and Firefox, that lets the [DeepSeek web chat](https://chat.deepseek.com) read and edit files and run commands on your computer. It works with the free chat on the website. There is no API key and nothing to pay for.
 
 This is unofficial and has nothing to do with DeepSeek. It relies on the site's private web API and on the structure of its pages, so a DeepSeek update can break it without warning. Check DeepSeek's terms of use before you rely on it.
 
@@ -10,7 +10,7 @@ The extension adds a hidden prompt to your messages that teaches the model six t
 
 The hidden prompt is added to outgoing requests and removed from the history again, so it never shows up in the chat. DeepSeek's own web search and DeepThink keep working.
 
-Developed and tested on Windows with Brave and Chromium. It should work in Chrome and Edge. macOS and Linux are supported by the host but have had much less use.
+Developed and tested on Windows with Brave and Chromium. It should work in Chrome and Edge. Firefox 140 or newer is supported too, but that build is new and has had much less use than the Chromium one. macOS and Linux are supported by the host but have had much less use.
 
 ## Screenshots
 
@@ -28,17 +28,28 @@ Evil Mode, turned on with `/evil`, gives the page a red look and adds your own i
 
 ## Install on Windows
 
-Download `DeepSeekWebAgentSetup.exe` from the [latest release](https://github.com/ItsDaxi/deepseek-web-agent/releases/latest) and run it. It needs no admin rights and no Node.js, and installs into your user folder. You can remove it from Installed apps in Windows Settings.
+Download `dsx-<version>-setup.exe` from the [latest release](https://github.com/ItsDaxi/deepseek-web-agent/releases/latest) and run it. It needs no admin rights and no Node.js, and installs into your user folder. You can remove it from Installed apps in Windows Settings.
 
-Browsers only let you add an unpacked extension yourself, so the setup opens the right page, copies the folder path for you, and carries on once it sees the extension.
+Browsers only let you add an unpacked extension yourself, so the setup opens the right page, copies the folder path for you, and carries on once it sees the extension. The setup also registers the native host for Firefox, but adding the extension to Firefox is a separate step: see below.
 
 The setup is not signed, so SmartScreen may warn you. Choose More info, then Run anyway, if you trust where you got it.
 
-The installer is attached to each release and is not in the repository. To build it yourself, you need Windows and a local Node.js, and the result lands in `dist`:
+The installer is attached to each release and is not in the repository. To build it yourself, you need Windows and a local Node.js, and the result lands in `dist/<version>/`:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File installer/build.ps1
 ```
+
+## Firefox
+
+Firefox 140 or newer, on desktop. The native host is the same one the other browsers use: the setup registers it for Firefox as well, and from source `node host/install.js --browsers firefox` does the same.
+
+Release Firefox only installs extensions that Mozilla has signed. There are two ways to add this one:
+
+- **Try it from source.** Open `about:debugging#/runtime/this-firefox`, click Load Temporary Add-on and pick `extension/manifest.json`. It stays until you close Firefox. If the page shows no controls, open the extension's page in `about:addons`, then Permissions, and allow it on `chat.deepseek.com`.
+- **Install it for good.** `node installer/build-firefox.js` packs the extension into `dist/<version>/dsx-<version>-firefox-unsigned.zip`. Mozilla signs an extension for free as a self-distributed ("unlisted") add-on that is not listed in their store. Upload the zip at [addons.mozilla.org/developers](https://addons.mozilla.org/developers/) and choose to distribute it on your own. Mozilla sends back a signed file with a long generated name: rename it to `dsx-<version>-firefox.xpi` and open it in Firefox. `installer/release.ps1` attaches it to the release when it is there.
+
+The extension reloads itself after the setup updates its files, which works for Chromium. In Firefox a signed `.xpi` is updated by installing the new one.
 
 ## Install from source
 
@@ -50,11 +61,11 @@ You need [Node.js](https://nodejs.org) 18 or newer. This is also the way to inst
    node host/install.js
    ```
 
-   Add `--browsers brave,chrome` to pick browsers. The path of the host is written into the registration, so run this again if you move the folder or change your Node installation.
+   Add `--browsers brave,chrome` to pick browsers (`chrome`, `brave`, `chromium`, `edge`, `firefox`). The path of the host is written into the registration, so run this again if you move the folder or change your Node installation.
 
    Run it from a normal terminal. On Windows, a packaged app (the Claude desktop app, for one) gets a private copy of the registry, so a registration made from inside it is invisible to a browser you start yourself.
 
-2. Open `brave://extensions` (or `chrome://extensions`), turn on Developer mode, click Load unpacked and select the `extension` folder.
+2. Open `brave://extensions` (or `chrome://extensions`), turn on Developer mode, click Load unpacked and select the `extension` folder. For Firefox, see the section above.
 
 3. Restart the browser and open [chat.deepseek.com](https://chat.deepseek.com). A pill at the top right should read `Shell · Connected`.
 
@@ -114,6 +125,15 @@ This is the only request the extension makes besides the ones to DeepSeek. It go
 
 For maintainers. The update notice compares the `version` in `extension/manifest.json` with the latest release tag, so every release has to raise it. One script does the whole job: it raises the version, runs the tests, builds the setup, commits, pushes, and creates the GitHub release with the setup attached and its SHA-256 in the notes.
 
+A release is named `v<version>` and holds files named `dsx-<version>-<what>`, all built into one folder per version in `dist`:
+
+```
+dist/0.6.0/
+  dsx-0.6.0-setup.exe                   Windows setup, attached to the release
+  dsx-0.6.0-firefox-unsigned.zip        what you send to Mozilla for signing
+  dsx-0.6.0-firefox.xpi                 the signed file, attached when it is there
+```
+
 ```bash
 powershell -ExecutionPolicy Bypass -File installer/release.ps1 -Version 0.2.0
 ```
@@ -165,7 +185,7 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `host/tools.js` | The `read`, `write`, `edit`, `glob` and `grep` tools |
 | `host/pick-folder.ps1` | The folder dialog on Windows |
 | `host/install.js` | Registers and removes the native host when installing from source |
-| `installer/` | The Windows setup and its build script |
+| `installer/` | The Windows setup, the Firefox package, and the build and release scripts |
 
 The model writes `<dsx:shell timeout="30">command</dsx:shell>`, with optional `cwd` and `shell` attributes. Each command is a new process with no stdin, so a `cd` does not carry over to the next one. If the model leaves out the timeout it falls back to 120 seconds, and the maximum is 600.
 

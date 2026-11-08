@@ -1,4 +1,5 @@
-# Builds dist\DeepSeekWebAgentSetup.exe with only what ships with Windows, plus the local Node.js runtime it bundles.
+# Builds dist\<version>\dsx-<version>-setup.exe with only what ships with Windows, plus the local Node.js
+# runtime it bundles.
 param([string]$NodeExe = '')
 
 $ErrorActionPreference = 'Stop'
@@ -62,6 +63,10 @@ $sha = [Security.Cryptography.SHA256]::Create().ComputeHash([Convert]::FromBase6
 $extensionId = -join ($sha[0..15] | ForEach-Object { [char](97 + ($_ -shr 4)); [char](97 + ($_ -band 15)) })
 $source = Join-Path $PSScriptRoot 'Setup.cs'
 if (-not (Select-String -Path $source -SimpleMatch $extensionId -Quiet)) { throw "Setup.cs does not use the extension ID $extensionId." }
+$geckoId = $manifest.browser_specific_settings.gecko.id
+if (-not (Select-String -Path $source -SimpleMatch $geckoId -Quiet)) { throw "Setup.cs does not use the Firefox extension ID $geckoId." }
+# One folder per version, so older builds stay next to each other and never mix with a newer one.
+$release = Join-Path $dist $manifest.version
 
 if (-not $NodeExe) { $NodeExe = (Get-Command node).Source }
 $NodeExe = (Get-Item $NodeExe).FullName
@@ -100,7 +105,8 @@ Get-ChildItem (Join-Path $work 'payload') -Recurse -File | ForEach-Object {
 $archive.Dispose()
 
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-$output = Join-Path $dist 'DeepSeekWebAgentSetup.exe'
+New-Item -ItemType Directory -Force $release | Out-Null
+$output = Join-Path $release "dsx-$($manifest.version)-setup.exe"
 if (Test-Path $output) { Remove-Item $output -Force -Confirm:$false }
 $arguments = @(
   '/nologo', '/target:winexe', '/optimize+', '/platform:x64', "/out:$output",

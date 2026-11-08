@@ -1,7 +1,9 @@
 // Bridges DeepSeek tabs and the native host, and routes command output back to the tab that asked.
 'use strict';
 
-importScripts('lib/update-check.js');
+// Chromium runs this file as a service worker and loads the library here. Firefox runs it as an event
+// page, where the manifest lists lib/update-check.js before this file, so it is already loaded.
+if (typeof importScripts === 'function') importScripts('lib/update-check.js');
 
 const HOST_NAME = 'com.dsx.shell_host';
 const ALLOWED_ORIGIN = 'https://chat.deepseek.com';
