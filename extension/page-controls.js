@@ -123,6 +123,21 @@
     @media (prefers-reduced-motion: reduce) { .update { transition: none; } }
   `;
 
+  // The line under the composer in a conversation: turns, time, speed and tokens. Quiet text, centred
+  // under the box, in the page's own small grey; the bars between the figures are fainter still.
+  const STATS_STYLES = `
+    :host { display: block; }
+    :host([hidden]) { display: none; }
+    .line {
+      display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px 0; margin: 8px 12px 0;
+      font: 12px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums;
+      color: var(--dsw-alias-label-tertiary, #adb2b8); text-align: center;
+    }
+    .part { white-space: nowrap; }
+    .bar { margin: 0 9px; opacity: .45; }
+  `;
+  const SESSION_IN_PATH = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
   const DOT_COLORS = { ok: 'var(--dsw-alias-state-success-primary, #22c55e)', warn: '#e5a13a' };
 
   function attach(tag, styles, markup) {
@@ -452,6 +467,12 @@
     model.host.style.marginRight = '8px';
     workspace.host.style.cssText = 'display: flex; align-self: flex-start; margin: 0 0 8px 4px;';
 
+    // Shown only while a conversation is open, and then only when it has figures.
+    const stats = attach('dsx-stats', STATS_STYLES, '<div class="line"></div>');
+    stats.host.hidden = true;
+    const statsLine = stats.shadow.querySelector('.line');
+    let statsText = '';
+
     const evil = attach('dsx-evil-button', EVIL_BUTTON_STYLES, `<button type="button" data-action="toggle-evil">${iconMarkup('flame')}</button>`);
     const evilButton = evil.shadow.querySelector('button');
 
@@ -604,6 +625,28 @@
       tooltip.refresh();
     }
 
+    // `text` is the finished line, figures separated by " | ", or '' for none. It is drawn as text nodes
+    // only, so nothing in it can be taken for markup.
+    function setStats(text) {
+      if (text === statsText) return;
+      statsText = text;
+      statsLine.replaceChildren();
+      const parts = text ? text.split(' | ') : [];
+      parts.forEach((part, index) => {
+        if (index > 0) {
+          const bar = document.createElement('span');
+          bar.className = 'bar';
+          bar.textContent = '|';
+          statsLine.append(bar);
+        }
+        const item = document.createElement('span');
+        item.className = 'part';
+        item.textContent = part;
+        statsLine.append(item);
+      });
+      stats.host.hidden = !parts.length;
+    }
+
     // `used` and `limit` are tokens, as DeepSeek counts them. They are shown in the model panel.
     function setContext({ used, limit }) {
       const next = { used: Math.max(0, Number(used) || 0), limit: Number.isFinite(limit) && limit > 0 ? limit : null };
@@ -677,6 +720,11 @@
       // The workspace sits right above the composer's rounded box.
       const box = findComposerBox(group);
       if (box && box.parentElement && workspace.host.nextElementSibling !== box) box.parentElement.insertBefore(workspace.host, box);
+      if (box) {
+        // A new chat has no id in its address: the box glows. In a conversation the stats go under it.
+        box.toggleAttribute('data-dsx-glow', !SESSION_IN_PATH.test(location.pathname));
+        if (box.nextElementSibling !== stats.host && box.parentElement) box.after(stats.host);
+      }
       syncToggles();
     }
 
@@ -694,7 +742,7 @@
       return true;
     }
 
-    return { update, mount, playModeWave, setContext, openPermission, openModel, openFileDialog, icon: iconMarkup };
+    return { update, mount, playModeWave, setContext, setStats, openPermission, openModel, openFileDialog, icon: iconMarkup };
   }
 
   root.DsxPageControls = { createPageControls, findComposerBox };

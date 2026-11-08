@@ -9,6 +9,7 @@
   const { createThinkCounter } = globalThis.DsxThinkTokens;
   const { createSlashCommands } = globalThis.DsxSlashCommands;
   const { modeLabel } = globalThis.DsxMenus;
+  const { createChatStats, formatStats } = globalThis.DsxChatStats;
 
   // mode is the permission preset: 'ask' (Read Only), 'workspace' (Workspace Write) or 'bypass' (Full access).
   // workspaces are the folders the user chose before, listed in the workspace menu; cwd is the current one.
@@ -61,6 +62,17 @@
   let contextLimit = CONTEXT_WINDOW_TOKENS;
   let shownContext = '';
   const WAITING = 'Waiting for the commands before it to finish.';
+
+  // The figures of the stats line, kept for the life of the tab so a reload of the page does not lose them.
+  const STATS_KEY = 'dsx-chat-stats';
+  const SESSION_IN_PATH = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+  const chatStats = createChatStats({
+    store: {
+      read: () => JSON.parse(sessionStorage.getItem(STATS_KEY) || 'null'),
+      write: (value) => sessionStorage.setItem(STATS_KEY, JSON.stringify(value)),
+    },
+  });
+  let shownStats = null;
 
   const store = createCardStore({ onAction: handleAction });
   // DeepSeek has no setting to keep its "Thought for N seconds" blocks collapsed, so the extension does it.
@@ -679,6 +691,17 @@
       case 'user-turn':
         autoTurns = 0;
         turn = null;
+        chatStats.userTurn(message.sessionId, message.first === true);
+        break;
+      case 'stream-start':
+        chatStats.streamStart(message.sessionId, message.at);
+        break;
+      case 'first-token':
+        chatStats.firstToken(message.sessionId, message.at);
+        break;
+      case 'reply-end':
+        chatStats.replyEnd(message.sessionId, message.at, message.tokens, message.live === true);
+        renderStats();
         break;
       case 'stream-end':
         // Nothing more arrives for this reply. The calls still queued behind one another stay
@@ -694,7 +717,9 @@
         applyHistory(message);
         if (message.tokens && message.sessionId) {
           chatTokens.set(message.sessionId, message.tokens);
+          chatStats.usage(message.sessionId, message.tokens);
           renderContext();
+          renderStats();
         }
         break;
       case 'think-tokens':
@@ -702,7 +727,9 @@
         break;
       case 'usage':
         chatTokens.set(message.sessionId, message.tokens);
+        chatStats.usage(message.sessionId, message.tokens);
         renderContext();
+        renderStats();
         break;
       case 'context-limit':
         contextLimit = Math.max(message.tokens, CONTEXT_WINDOW_TOKENS);
@@ -783,6 +810,7 @@
     }
     controls.mount();
     renderContext();
+    renderStats();
     thinkCounter.schedule();
   }).observe(document, { childList: true, subtree: true, characterData: true });
 
@@ -808,6 +836,16 @@
     if (key === shownContext) return;
     shownContext = key;
     controls.setContext({ used, limit: contextLimit });
+  }
+
+  // The stats line under the composer, for the chat that is open. A new chat has no id in its address
+  // and no line: it shows the glow instead.
+  function renderStats() {
+    const match = SESSION_IN_PATH.exec(location.pathname);
+    const text = match ? formatStats(chatStats.summary(match[0]), globalThis.DsxFormatTokens.formatTokens) : '';
+    if (text === shownStats) return;
+    shownStats = text;
+    controls.setStats(text);
   }
 
   // ---- Status pill ---------------------------------------------------------------------------

@@ -103,7 +103,8 @@
       body.prompt = Protocol.injectPrompt(body.prompt, config.env, { full, extra, retire });
       if (extra) extraSent.set(request.sessionId, extra);
       if (retire) extraSent.delete(request.sessionId);
-      post({ type: 'user-turn' });
+      // `first` is the opening message of a chat, so the stats of a chat can tell it was followed from the start.
+      post({ type: 'user-turn', sessionId: request.sessionId, first: full });
     }
     return JSON.stringify(body);
   }
@@ -174,14 +175,18 @@
 
   // ---- Stream responses ----------------------------------------------------------------------
 
+  // The moments the stats line needs are stamped here, in the page's own clock.
+  const TIMED_EVENTS = new Set(['first-token', 'reply-end']);
+
   function beginStream(xhr, request) {
     activeStreams += 1;
+    post({ type: 'stream-start', sessionId: request.sessionId, at: performance.now(), path: request.path });
     request.rewriter = Filter.createSseRewriter({
       sessionId: request.sessionId,
       // A resumed stream replays text the user may already have acted on, so it never auto-runs.
       live: request.path !== '/api/v0/chat/resume_stream' && request.path !== '/api/v0/chat/continue',
       rewriteTitle: (title) => fixLeakedTitle(request, title),
-      onEvent: post,
+      onEvent: (event) => post(TIMED_EVENTS.has(event.type) ? { ...event, at: performance.now() } : event),
     });
     xhr.addEventListener('readystatechange', () => {
       if (xhr.readyState >= 3) streamView(xhr, request);

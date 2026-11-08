@@ -162,6 +162,10 @@
     // replayed stream sends its text in big pieces, so what it counts is marked as not exact.
     let thinkTokens = 0;
     let thinkOpen = false;
+    // Everything the model wrote, reasoning and answer, counted the same way. The first one also marks
+    // when the reply began, and the end of the stream reports the total, for the stats line.
+    let outputTokens = 0;
+    let firstTokenSeen = false;
 
     function nextId() {
       callCount += 1;
@@ -199,6 +203,13 @@
       reportThink(false);
     }
 
+    function countOutputToken() {
+      outputTokens += 1;
+      if (firstTokenSeen) return;
+      firstTokenSeen = true;
+      onEvent({ type: 'first-token', sessionId, messageId, live });
+    }
+
     function beginFragment(type) {
       if (fragmentType === 'THINK' && type !== 'THINK') endThink();
       fragmentType = type;
@@ -223,6 +234,7 @@
       fragments.forEach((fragment, index) => {
         beginFragment(fragment.type);
         if (fragment.type === 'THINK' && typeof fragment.content === 'string' && fragment.content !== '') countThinkToken();
+        if ((fragment.type === 'THINK' || fragment.type === 'RESPONSE') && typeof fragment.content === 'string' && fragment.content !== '') countOutputToken();
         if (scanner && typeof fragment.content === 'string') {
           let content = scanner.push(fragment.content);
           if (index < fragments.length - 1) content += scanner.flush();
@@ -260,6 +272,7 @@
 
       if (isContentPath(path) && typeof patch.v === 'string' && patch.o !== 'SET' && scanner) {
         if (fragmentType === 'THINK' && patch.v !== '') countThinkToken();
+        if ((fragmentType === 'THINK' || fragmentType === 'RESPONSE') && patch.v !== '') countOutputToken();
         const text = scanner.push(patch.v);
         if (text === '' && patch.p === undefined) {
           skipBlankLine = true;
@@ -332,6 +345,7 @@
         const rest = partialLine ? rewriteLine(partialLine) : '';
         partialLine = '';
         endThink();
+        onEvent({ type: 'reply-end', sessionId, messageId, live, tokens: outputTokens, think: thinkTokens });
         return rest + flushFragment();
       },
     };

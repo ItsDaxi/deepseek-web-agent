@@ -37,6 +37,20 @@ textarea[data-dsx-sending] {
   min-width: 0;
 }
 
+/* The composer glows softly on a new chat, before there is a conversation. page-controls.js marks the box.
+   A drop-shadow filter follows the box's shape and leaves its own shadows and focus ring alone. The colour
+   is a soft white with a touch of the page's brand colour, so Evil Mode tints it red with the rest. */
+[data-dsx-glow] {
+  filter:
+    drop-shadow(0 0 20px color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 9%, transparent))
+    drop-shadow(0 0 70px color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 12%, transparent));
+  transition: filter .45s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-dsx-glow] { transition: none; }
+}
+
 /* DeepSeek's own DeepThink, Search and attach buttons. The extension's controls replace them and drive
    them, so they stay in the page (and keep working) but are not drawn. */
 [data-dsx-hidden] {

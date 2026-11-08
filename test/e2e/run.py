@@ -5,6 +5,7 @@ Usage: python -I test/e2e/run.py [screenshot_dir]
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -670,6 +671,33 @@ def run(context, server):
     (project / "AGENTS.md").unlink()
     project.rmdir()
     pause(1)
+
+    # The stats line under the composer in a conversation, and the glow on a new chat.
+    send_and_wait("one more for the stats")
+    pattern = re.compile(r"\d+ turns? · \d+ steps?")
+    check("a conversation shows its turns and steps under the composer", wait_until(lambda: pattern.search(shadow.text()) is not None, message="stats line"), shadow.text()[-300:])
+    stats_text = shadow.text()
+    check("the stats line has the time, the first token and the tokens written", "LLM " in stats_text and "TTFT avg " in stats_text and re.search(r"Output [0-9.]+[KM]? tok", stats_text) is not None, " ~ ".join(re.findall(r"[^\n]*(?:turn|LLM|TTFT|tok)[^\n]*", stats_text)))
+    check("a conversation has no glow", page.evaluate("!document.querySelector('[data-dsx-glow]')"))
+    if SCREENSHOTS:
+        page.screenshot(path=str(SCREENSHOTS / "11-stats-line.png"), clip={"x": 200, "y": 640, "width": 900, "height": 260})
+    check("the stats line sits right under the composer box", page.evaluate("""() => {
+      const host = document.querySelector('dsx-stats');
+      return Boolean(host) && !host.hidden && host.previousElementSibling && host.previousElementSibling.contains(document.querySelector('textarea'));
+    }"""))
+    # A new chat has no id in its address. The page is opened there, and then back on the conversation,
+    # where the stats are still the same, because the tab kept them.
+    before = pattern.search(shadow.text()).group(0)
+    page.goto("https://chat.deepseek.com/")
+    shadow = Shadow(page, context)
+    check("a new chat glows and shows no stats", wait_until(lambda: page.evaluate("!!document.querySelector('[data-dsx-glow]') && document.querySelector('dsx-stats').hidden"), message="glow on a new chat"))
+    if SCREENSHOTS:
+        pause(0.6)
+        page.screenshot(path=str(SCREENSHOTS / "12-glow-new-chat.png"), clip={"x": 100, "y": 480, "width": 1000, "height": 420})
+    page.goto(CHAT_URL)
+    shadow = Shadow(page, context)
+    wait_until(lambda: "Shell · Connected" in shadow.text(), message="connected after returning")
+    check("back in the conversation the glow goes and the stats return as they were", wait_until(lambda: page.evaluate("!document.querySelector('[data-dsx-glow]') && !!document.querySelector('dsx-stats') && !document.querySelector('dsx-stats').hidden") and before in shadow.text(), message="stats back"), before)
 
     # A page script could fake the keys to change the permission mode, so faked ones must do nothing.
     page.fill("#composer", "/perm")

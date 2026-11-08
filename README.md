@@ -80,6 +80,8 @@ All controls sit in the composer of the DeepSeek page. The extension has no tool
 - "Thought for N seconds" blocks are kept collapsed. Click one to read it, and it stays open. To stop this, run `chrome.storage.local.set({ collapseThinking: false })` in the extension's service worker console.
 - The model panel (click the model name above the send button) has a Context row: the tokens the chat has used against the model's 1M-token window, like `212K / 1M`, with a thin bar that turns amber and then red as it fills. It updates at the end of every reply, with the total DeepSeek counts.
 - Each thinking block shows how many tokens the model spent reasoning, counted live as it streams (`1.2K tokens`). DeepSeek sends the reasoning one token per chunk, so the count is exact; blocks from an earlier visit show none.
+- In a conversation, a line under the composer sums up the chat: turns and steps, the time the model spent (`LLM`), the average wait for the first token and the speed (`TTFT avg`, `tok/s`), and the tokens in and out. A turn is a message you wrote and a step is one reply of the model, so a command that goes back to the model adds a step. Input is what DeepSeek counts for the chat minus what the model wrote. A chat the tab did not follow from its first message, such as one opened from the history, shows only what happened since, and no input. The figures are kept while the tab lives, so a reload does not lose them. DeepSeek does not report cache hits to the page, so there is no such figure.
+- On a new chat, before there is a conversation, the composer glows softly. In Evil Mode the glow turns red with the rest.
 
 The model chooses the timeout of each command, up to 600 seconds.
 
@@ -184,6 +186,7 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | --- | --- |
 | `extension/lib/protocol.js` | The hidden prompt, the tool syntax and the format of result messages |
 | `extension/lib/stream-filter.js` | Removes tool syntax from the response stream and from the history |
+| `extension/lib/chat-stats.js` | The figures of the stats line under the composer: turns, steps, time, speed and tokens |
 | `extension/lib/context-usage.js` | Reads the token total DeepSeek counts for a chat, and the model's token limit, for the Context row of the model panel |
 | `extension/page-hook.js` | Wraps `XMLHttpRequest` and sends results through the page's own composer |
 | `extension/content.js` | Approval decisions, the life of each command, and changes to the page |
