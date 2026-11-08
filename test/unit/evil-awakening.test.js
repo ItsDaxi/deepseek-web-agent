@@ -16,6 +16,19 @@ function fakeContext() {
   };
 }
 
+// The glitch is random, and about one frame in eighty has fewer than 300 shapes, so a test that counts
+// them uses a generator of its own, which always gives the same frame.
+function seeded(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 test('the glitch covers the screen at first, more and more, then nothing at the end', () => {
   assert.ok(coverageAt(0) > 0 && coverageAt(0) < 1);
   assert.ok(coverageAt(150) > coverageAt(0));
@@ -27,7 +40,7 @@ test('the glitch covers the screen at first, more and more, then nothing at the 
 
 test('a full frame is detailed and spans the whole height and width', () => {
   const context = fakeContext();
-  drawGlitch(context, 1280, 720, 1);
+  drawGlitch(context, 1280, 720, 1, seeded(1));
   assert.ok(context.calls.rects.length > 300, `only ${context.calls.rects.length} shapes`);
   const bottom = Math.max(...context.calls.rects.map((rect) => rect.y + rect.h));
   assert.ok(bottom >= 720, 'the bands reach the bottom of the screen');
