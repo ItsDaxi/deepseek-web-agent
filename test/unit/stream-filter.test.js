@@ -203,6 +203,33 @@ test('title rewriting replaces only the title event', () => {
   assert.ok(!output.includes('A title'));
 });
 
+test('the AI-generated notice is removed from the stream', () => {
+  const tip = { id: 4, type: 'TIP', content: 'This response is AI-generated, for reference only.', style: 'WARNING' };
+  const sse = [
+    'data: {"v":{"response":{"message_id":2,"status":"WIP","fragments":[{"id":2,"type":"RESPONSE","content":"Hi"}]}}}',
+    '',
+    `data: ${JSON.stringify({ p: 'response/fragments', o: 'SET', v: [{ id: 2, type: 'RESPONSE', content: 'Hi there' }, tip] })}`,
+    '',
+    'data: {"p":"response/status","o":"SET","v":"FINISHED"}',
+    '',
+  ].join('\n');
+  const { output } = rewriteInChunks(sse, 17);
+  assert.ok(!output.includes('AI-generated'));
+  assert.ok(!renderStream(output).some((fragment) => fragment.type === 'TIP'));
+  assert.ok(output.includes('Hi there'));
+});
+
+test('the AI-generated notice is removed from the history', () => {
+  const payload = { data: { biz_data: { chat_session: { id: 'abcdef01' }, chat_messages: [
+    { message_id: 2, role: 'ASSISTANT', fragments: [
+      { type: 'RESPONSE', content: 'Hello' },
+      { type: 'TIP', content: 'This response is AI-generated, for reference only.' },
+    ] },
+  ] } } };
+  rewriteHistory(payload, 'abcdef01');
+  assert.deepEqual(payload.data.biz_data.chat_messages[0].fragments.map((fragment) => fragment.type), ['RESPONSE']);
+});
+
 test('history drops the hidden prompt and rebuilds calls and results', () => {
   const firstPrompt = Protocol.injectPrompt('list my files', { platform: 'win32' }, { full: true });
   const result = Protocol.buildResultMessage({ id: 'abcdef01-2-1', status: 'ok', code: 0, durationMs: 42, output: 'a.txt' });

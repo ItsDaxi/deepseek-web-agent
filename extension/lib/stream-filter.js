@@ -140,6 +140,15 @@
     return { push, flush };
   }
 
+  // DeepSeek ends a reply with a TIP fragment ("This response is AI-generated, for reference only."). It is
+  // a notice, not part of the answer, so it is removed before the page ever sees it. Done in place because
+  // the page applies the patch it is handed.
+  function dropNotices(fragments) {
+    for (let index = fragments.length - 1; index >= 0; index -= 1) {
+      if (fragments[index] && fragments[index].type === 'TIP') fragments.splice(index, 1);
+    }
+  }
+
   function isContentPath(path) {
     return /^response\/fragments\/-?\d+\/content$/.test(path);
   }
@@ -231,6 +240,11 @@
     }
 
     function rewriteFragments(fragments) {
+      forEachFragment(fragments);
+      dropNotices(fragments);
+    }
+
+    function forEachFragment(fragments) {
       fragments.forEach((fragment, index) => {
         beginFragment(fragment.type);
         if (fragment.type === 'THINK' && typeof fragment.content === 'string' && fragment.content !== '') countThinkToken();
@@ -386,6 +400,7 @@
         });
         return scanner.push(text) + scanner.flush();
       };
+      if (Array.isArray(message.fragments)) dropNotices(message.fragments);
       for (const fragment of message.fragments || []) {
         if (typeof fragment.content !== 'string') continue;
         if (fragment.type === 'RESPONSE') fragment.content = rewriteText(fragment.content, 'call');
