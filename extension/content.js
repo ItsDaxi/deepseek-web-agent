@@ -10,13 +10,14 @@
   const { createSlashCommands } = globalThis.DsxSlashCommands;
   const { modeLabel } = globalThis.DsxMenus;
   const { createChatStats, formatStats } = globalThis.DsxChatStats;
+  const { createTerminal } = globalThis.DsxTerminal;
 
   // mode is the permission preset: 'ask' (Read Only), 'workspace' (Workspace Write) or 'bypass' (Full access).
   // workspaces are the folders the user chose before, listed in the workspace menu; cwd is the current one.
   // thinking is the Effort switch, which drives DeepSeek's DeepThink. Search is always on.
   // dismissedUpdate is the release tag whose notice the user closed.
   // evilOn: the user's own instructions, read from evil.txt, are added to the hidden prompt.
-  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', evilOn: false };
+  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', evilOn: false, terminalOpen: false, terminalWidth: 440 };
   const MAX_WORKSPACES = 8;
   // Used only when the model leaves out the timeout it is asked to choose.
   const FALLBACK_TIMEOUT_SECONDS = 120;
@@ -73,6 +74,21 @@
     },
   });
   let shownStats = null;
+
+  // The side terminal: the user's own commands, through the same native host. See terminal.js.
+  const terminal = createTerminal({
+    host: () => hostInfo,
+    workspace: () => settings.cwd,
+    send: (message) => {
+      if (!port || !hostInfo) return false;
+      port.postMessage(message);
+      return true;
+    },
+    onState: ({ open, width }) => {
+      controls.setTerminalOpen(open);
+      if (settings.terminalOpen !== open || settings.terminalWidth !== width) saveSettings({ terminalOpen: open, terminalWidth: width });
+    },
+  });
 
   const store = createCardStore({ onAction: handleAction });
   // DeepSeek has no setting to keep its "Thought for N seconds" blocks collapsed, so the extension does it.
@@ -200,12 +216,15 @@
     pushConfig();
     renderControls();
     thinkCollapser.scan();
+    // The terminal comes back as the user left it.
+    if (settings.terminalOpen) terminal.open(settings.terminalWidth);
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (Object.keys(changes).every((key) => !(key in DEFAULT_SETTINGS))) return;
     for (const [key, change] of Object.entries(changes)) settings[key] = change.newValue;
+    if (changes.cwd) terminal.setWorkspace(settings.cwd);
     if (changes.cwd && hostInfo) loadInstructions();
     applyEvilLook();
     pushConfig();
@@ -245,6 +264,7 @@
 
   // A lost connection also loses the command's exit message, so its card must not spin forever.
   function failRunningCommands() {
+    terminal.connectionLost();
     for (const tool of store.list()) {
       if (tool.status !== 'running') continue;
       finishCommand({
@@ -258,6 +278,11 @@
   }
 
   function handleBackgroundMessage(message) {
+    // The host's answers to a command typed in the terminal belong to the terminal and to no card.
+    if (typeof message.id === 'string' && message.id.startsWith('term-')) {
+      terminal.handleMessage(message);
+      return;
+    }
     switch (message.type) {
       case 'prepare-reload':
         // The extension is about to reload itself after an update. This page can follow it with a
@@ -299,6 +324,7 @@
         break;
       case 'host-status':
         hostInfo = message.connected ? message.info : null;
+        terminal.hostChanged();
         hostError = message.connected ? null : message.error;
         pushConfig();
         renderControls();
@@ -890,6 +916,7 @@
     onSetThinking: (thinking) => saveSettings({ thinking }),
     onDismissUpdate: (tag) => saveSettings({ dismissedUpdate: tag }),
     onToggleEvil: toggleEvilFromButton,
+    onToggleTerminal: () => terminal.toggle(),
   });
 
   // The Evil Mode button in the sidebar does what /evil does and answers in the same small panel.
@@ -1015,6 +1042,16 @@
       run: () => {
         // Opens the issue page of the project in a new tab. Nothing is sent from here.
         window.open(FEEDBACK_URL, '_blank', 'noopener,noreferrer');
+        return { lines: [] };
+      },
+    },
+    {
+      name: 'terminal',
+      group: 'Commands',
+      icon: 'terminal',
+      description: 'Open or close the side terminal',
+      run: () => {
+        terminal.toggle();
         return { lines: [] };
       },
     },

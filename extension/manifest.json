@@ -25,7 +25,7 @@
     },
     {
       "matches": ["https://chat.deepseek.com/*"],
-      "js": ["lib/slash-match.js", "lib/format-tokens.js", "lib/chat-stats.js", "cards.js", "menus.js", "page-controls.js", "evil-awakening.js", "evil-greeting.js", "think-collapse.js", "think-tokens.js", "slash-commands.js", "content.js"],
+      "js": ["lib/slash-match.js", "lib/format-tokens.js", "lib/chat-stats.js", "lib/terminal-core.js", "cards.js", "menus.js", "page-controls.js", "evil-awakening.js", "evil-greeting.js", "think-collapse.js", "think-tokens.js", "slash-commands.js", "terminal.js", "content.js"],
       "css": ["page.css", "logos.css", "evil.css"],
       "run_at": "document_start"
     }

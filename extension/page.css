@@ -37,6 +37,29 @@ textarea[data-dsx-sending] {
   min-width: 0;
 }
 
+/* The side terminal docks on the right and the whole app shrinks to make room for it: terminal.js sets the
+   width. The app's root is pinned to the space that is left. The transform makes it the containing block of
+   everything fixed inside it (the composer, the sidebar), so those shrink with it instead of staying under
+   the terminal. If the page has no #root, the body gets the margin instead. */
+html[data-dsx-terminal] #root {
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: calc(100vw - var(--dsx-terminal-width, 0px)) !important;
+  max-width: calc(100vw - var(--dsx-terminal-width, 0px)) !important;
+  overflow: hidden;
+  transform: translateZ(0);
+}
+
+html[data-dsx-terminal] body {
+  overflow: hidden;
+}
+
+html[data-dsx-terminal] body:not(:has(> #root)) {
+  margin-right: var(--dsx-terminal-width, 0px) !important;
+}
+
 /* The composer glows softly on a new chat, before there is a conversation. page-controls.js marks the box.
    A drop-shadow filter follows the box's shape and leaves its own shadows and focus ring alone. The colour
    is a soft white with a touch of the page's brand colour, so Evil Mode tints it red with the rest. */

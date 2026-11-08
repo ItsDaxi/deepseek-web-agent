@@ -699,6 +699,70 @@ def run(context, server):
     wait_until(lambda: "Shell · Connected" in shadow.text(), message="connected after returning")
     check("back in the conversation the glow goes and the stats return as they were", wait_until(lambda: page.evaluate("!document.querySelector('[data-dsx-glow]') && !!document.querySelector('dsx-stats') && !document.querySelector('dsx-stats').hidden") and before in shadow.text(), message="stats back"), before)
 
+    # The side terminal: it opens, runs commands through the host, follows cd, expands, stops and closes.
+    def terminal_present():
+        return page.evaluate("!!document.querySelector('dsx-terminal')")
+
+    check("the terminal is closed at first", not terminal_present())
+    shadow.click_last("toggle-terminal")
+    check("the button opens the terminal on the right", wait_until(terminal_present, message="terminal open"))
+    check("the whole page, the composer included, shrinks to make room for it", wait_until(lambda: page.evaluate("document.getElementById('root').getBoundingClientRect().right < window.innerWidth - 300 && document.querySelector('.composer-wrap').getBoundingClientRect().right < window.innerWidth - 300"), message="room for the terminal"))
+    check("the terminal says which shell it uses", wait_until(lambda: "each command runs on its own" in shadow.text(), message="terminal greeting"))
+    shadow.click_last("terminal-input")
+    page.keyboard.type("node -e \"console.log('dsx-'+'term-'+'ok')\"")
+    page.keyboard.press("Enter")
+    check("a command runs and its output shows", wait_until(lambda: "dsx-term-ok" in shadow.text(), message="terminal output"))
+    check("a real keyboard is the only thing that types: the closed panel gives a page script nothing", page.evaluate("!document.querySelector('dsx-terminal').shadowRoot"))
+
+    folder = WORKDIR
+    shadow.click_last("terminal-input")
+    page.keyboard.type(f'cd "{folder}"')
+    page.keyboard.press("Enter")
+    check("cd changes the folder of the terminal", wait_until(lambda: folder.name in shadow.text().split("each command")[-1].replace(f'cd "{folder}"', ""), message="prompt follows cd"))
+    page.keyboard.type("node -p \"require('path').basename(process.cwd()) + '-here'\"")
+    page.keyboard.press("Enter")
+    check("the next command runs in that folder", wait_until(lambda: f"{folder.name}-here" in shadow.text(), message="command in the new folder"))
+    # Enter is ignored while a command runs, so each one is given a moment to finish before the next.
+    pause(1)
+    if SCREENSHOTS:
+        page.screenshot(path=str(SCREENSHOTS / "13-terminal.png"))
+    page.keyboard.type("node -e \"process.exit(5)\"")
+    page.keyboard.press("Enter")
+    # PowerShell reports 1 for a native command that failed, so the number is the host's, not the program's.
+    exit_mark = re.compile(r"\[exit \d+\]")
+    check("a failing command shows its exit code", wait_until(lambda: exit_mark.search(shadow.text()) is not None, message="exit code"), shadow.text().split("each command runs on its own")[-1][-600:])
+    pause(1)
+    page.keyboard.press("ArrowUp")
+    page.keyboard.press("Enter")
+    check("the up arrow brings back the last command, and Enter runs it again", wait_until(lambda: len(exit_mark.findall(shadow.text())) >= 2, message="second exit code"), shadow.text().split("each command runs on its own")[-1][-600:])
+    pause(1)
+
+    before = page.evaluate("document.querySelector('dsx-terminal').getBoundingClientRect().width")
+    shadow.click_last("terminal-expand")
+    check("expanding makes the terminal wider", wait_until(lambda: page.evaluate("document.querySelector('dsx-terminal').getBoundingClientRect().width") > before + 100, message="wider"))
+    shadow.click_last("terminal-expand")
+    check("shrinking brings it back", wait_until(lambda: abs(page.evaluate("document.querySelector('dsx-terminal').getBoundingClientRect().width") - before) < 2, message="narrower again"))
+
+    shadow.click_last("terminal-input")
+    page.keyboard.type("node -e \"setTimeout(function(){}, 60000)\"")
+    page.keyboard.press("Enter")
+    check("a running command offers to stop", wait_until(lambda: shadow.actions("terminal-stop") and "Running" in shadow.text(), message="stop button"))
+    pause(1)
+    page.keyboard.press("Control+c")
+    stopped_by_key = wait_until(lambda: "[stopped]" in shadow.text(), timeout=6, message="stopped by Ctrl+C")
+    if not stopped_by_key:
+        shadow.click_last("terminal-stop")
+    stopped_by_button = stopped_by_key or wait_until(lambda: "[stopped]" in shadow.text(), timeout=6, message="stopped by the button")
+    check("Ctrl+C stops it", stopped_by_key, "the stop button " + ("worked" if stopped_by_button else "did not work either"))
+
+    shadow.click_last("terminal-close")
+    check("the close button takes the terminal away", wait_until(lambda: not terminal_present(), message="terminal closed"))
+    check("and gives the page its width back", wait_until(lambda: page.evaluate("document.getElementById('root').getBoundingClientRect().right > window.innerWidth - 40 && document.querySelector('.composer-wrap').getBoundingClientRect().right > window.innerWidth - 250"), message="room back"))
+    run_command("/terminal")
+    check("/terminal opens it again", wait_until(terminal_present, message="terminal open by command"))
+    shadow.click_last("terminal-close")
+    wait_until(lambda: not terminal_present(), message="terminal closed again")
+
     # A page script could fake the keys to change the permission mode, so faked ones must do nothing.
     page.fill("#composer", "/perm")
     wait_until(lambda: "Switch the permission preset" in shadow.text(), message="permission command")

@@ -23,6 +23,7 @@
     check: '<path d="M5 12l5 5l10 -10"/>',
     plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 12h1v4h1"/>',
+    terminal: '<path d="M5 7l5 5l-5 5"/><path d="M12 17h7"/>',
     flame: '<path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z"/>',
   };
 
@@ -109,7 +110,11 @@
   // The top right corner: the connection pill, and to its left a link to the new release when
   // there is one. Both share one fixed row, so they never overlap whatever their width.
   const PILL_STYLES = `
-    :host { position: fixed; top: 12px; right: 16px; z-index: 2147483000; display: flex; align-items: center; gap: 8px; }
+    :host { position: fixed; top: 12px; right: calc(16px + var(--dsx-terminal-width, 0px)); z-index: 2147483000; display: flex; align-items: center; gap: 8px; }
+    .term { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border-radius: 999px; cursor: pointer; outline: none; color: var(--dsw-alias-label-secondary, #cfd3d6); background: var(--dsw-specific-tip, #353638); border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.06)); transition: background .2s ease, color .2s ease, border .2s ease; }
+    .term:hover { color: var(--dsw-alias-label-primary, #f9fafb); }
+    .term:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); }
+    .term[aria-pressed="true"] { color: var(--dsw-alias-brand-text, #679efe); border-color: color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 55%, transparent); }
     .status { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; font: 12px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--dsw-alias-label-secondary, #cfd3d6); background: var(--dsw-specific-tip, #353638); border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.06)); }
     .status i { width: 7px; height: 7px; flex: none; border-radius: 50%; }
     .update { display: inline-flex; align-items: center; height: 30px; border-radius: 999px; font: 500 12px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--dsw-alias-brand-text, #679efe); border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 55%, transparent); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 14%, transparent); transition: background .2s ease; }
@@ -441,13 +446,14 @@
     return iconMarkup('chevronDown').replace('<svg ', '<svg class="chev" ');
   }
 
-  function createPageControls({ onPickFolder, onChangeMode, onSelectWorkspace, onSetThinking, onDismissUpdate, onToggleEvil }) {
+  function createPageControls({ onPickFolder, onChangeMode, onSelectWorkspace, onSetThinking, onDismissUpdate, onToggleEvil, onToggleTerminal }) {
     const { MODES, MODEL_NAME, DEFAULT_WORKSPACE, basename, modeLabel } = root.DsxMenus;
     const pill = attach(
       'dsx-status',
       PILL_STYLES,
-      `<span class="update" hidden><a target="_blank" rel="noopener noreferrer">${iconMarkup('arrowUp')}<span></span></a><button type="button" aria-label="Dismiss" data-action="dismiss-update">×</button></span><div class="status"><i></i><span></span></div>`,
+      `<span class="update" hidden><a target="_blank" rel="noopener noreferrer">${iconMarkup('arrowUp')}<span></span></a><button type="button" aria-label="Dismiss" data-action="dismiss-update">×</button></span><button type="button" class="term" data-action="toggle-terminal" aria-label="Terminal" aria-pressed="false">${iconMarkup('terminal')}</button><div class="status"><i></i><span></span></div>`,
     );
+    const terminalButton = pill.shadow.querySelector('.term');
     const updateBox = pill.shadow.querySelector('.update');
     const updateLink = updateBox.querySelector('a');
     const updateLabel = updateBox.querySelector('a span');
@@ -495,8 +501,9 @@
     let nativeToggles = { think: null, search: null };
     const toggleSync = { lastClick: { think: 0, search: 0 }, tries: { think: 0, search: 0 } };
     // What each tooltip says right now. The tooltips read it when they show, and update() fills it in.
-    const tips = { pill: '', workspace: '', permission: '', attach: 'Attach files', evil: '', update: 'Open the release page. Run the new setup and the extension updates itself.' };
+    const tips = { terminal: 'Open the terminal', pill: '', workspace: '', permission: '', attach: 'Attach files', evil: '', update: 'Open the release page. Run the new setup and the extension updates itself.' };
     tooltip.bind(evilButton, () => tips.evil);
+    tooltip.bind(terminalButton, () => tips.terminal);
     tooltip.bind(pillBox, () => tips.pill);
     tooltip.bind(updateLink, () => tips.update);
     tooltip.bind(workspaceButton, () => tips.workspace);
@@ -568,6 +575,7 @@
       if (event.isTrusted) handler();
     };
     evilButton.addEventListener('click', trusted(onToggleEvil));
+    terminalButton.addEventListener('click', trusted(onToggleTerminal));
     updateClose.addEventListener('click', trusted(() => onDismissUpdate(updateTag)));
     workspaceButton.addEventListener('click', trusted(() => openMenu('workspace', workspace.host)));
     permissionButton.addEventListener('click', trusted(() => openMenu('permission', permission.host)));
@@ -645,6 +653,14 @@
         statsLine.append(item);
       });
       stats.host.hidden = !parts.length;
+    }
+
+    // The button in the top right row shows whether the side terminal is open.
+    function setTerminalOpen(open) {
+      terminalButton.setAttribute('aria-pressed', String(open));
+      terminalButton.setAttribute('aria-label', open ? 'Close the terminal' : 'Open the terminal');
+      tips.terminal = open ? 'Close the terminal' : 'Open the terminal';
+      tooltip.refresh();
     }
 
     // `used` and `limit` are tokens, as DeepSeek counts them. They are shown in the model panel.
@@ -742,7 +758,7 @@
       return true;
     }
 
-    return { update, mount, playModeWave, setContext, setStats, openPermission, openModel, openFileDialog, icon: iconMarkup };
+    return { update, mount, playModeWave, setContext, setStats, setTerminalOpen, openPermission, openModel, openFileDialog, icon: iconMarkup };
   }
 
   root.DsxPageControls = { createPageControls, findComposerBox };

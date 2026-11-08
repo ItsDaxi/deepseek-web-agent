@@ -101,6 +101,7 @@ A message that only starts with a slash, such as `/etc/hosts what is this file`,
 | `/model` | Opens the model panel, like the model button. |
 | `/status` | Shows the extension version, the shell host, the permissions, the workspace, the instruction files found, the effort and the thinking setting. |
 | `/thinking collapse` or `/thinking default` | Keeps the thinking blocks collapsed, or leaves them as DeepSeek shows them. |
+| `/terminal` | Opens or closes the side terminal. See below. |
 | `/evil` | Turns your own instructions for the model, read from `evil.txt`, on or off in the hidden prompt. See below. |
 | `/update` | Asks GitHub for the latest release now, and shows the update pill again if it was closed. It works even when the automatic check is off, because you are asking for it. |
 | `/help` | Lists the commands. |
@@ -127,6 +128,14 @@ The user's files come first, then the folders from the outermost to the working 
 The text goes out with your next message in each chat, once, and again only if it changes, which includes switching workspace. It sits in a hidden block, so it never shows in the chat. A file longer than 100,000 characters is cut, and together they stay under 300,000: past that, the ones furthest from the working folder are left out. `/status` lists the files that were found. They are read when the host connects and when you change workspace, so after editing one, reload the page or pick the workspace again.
 
 A file in a project folder is read as soon as you pick that folder, and it steers the model: do not pick a folder you did not write or do not trust. See Security.
+
+### Side terminal
+
+A button with a terminal icon in the top right, next to the connection pill, or `/terminal`, opens a terminal docked on the right of the page. The page makes room for it. The edge on its left can be dragged to set the width, the arrows button expands and shrinks it, and the cross, `exit` or the same button closes it. It comes back as you left it.
+
+You type at the prompt at the end of the output, as in any terminal. Up and Down walk through what you typed, Ctrl+C stops a running command, and Ctrl+L clears. A lone `cd` is followed, so the prompt shows the folder and the next command runs there. Changing the workspace above the composer moves the terminal to it.
+
+It runs commands through the same native host as the model, each in a process of its own. So the folder carries over, but variables do not, and a program that waits for you to type, such as `vim` or a REPL, does not work. What it runs is never sent to the model, and nothing the model writes can reach it.
 
 ### Update notice
 
@@ -174,6 +183,7 @@ Read this before you use Full access.
 - In Full access mode, a script running on chat.deepseek.com could trigger a command by forging the message the page hook sends. In Read Only mode it could only make an approval card appear. The cards live in a closed shadow root and react only to real clicks.
 - The danger labels on approval cards are pattern matches. They miss things, so read the command itself.
 - `AGENTS.md` and `CLAUDE.md` in a folder you pick are given to the model as instructions from you, without asking. A repository you downloaded can contain text meant to steer the model into running commands. Pick only folders you trust, and keep Read Only or Workspace Write for anything else. `/status` shows which files were read.
+- The side terminal runs what you type with your own rights, without asking: it is you typing. Pasting a command from a web page into it is as dangerous as in any terminal. Only your own keys and clicks work in it: a script on the page cannot type into it.
 - Everything a tool reads and everything a command prints is sent to DeepSeek's servers, secrets included. `glob` and `grep` skip common secret files. `shell` and an approved `read` do not.
 
 ## How it works
@@ -193,6 +203,8 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/cards.js` | Draws the tool cards |
 | `extension/evil-awakening.js` | The animation played when `/evil` is turned on |
 | `extension/evil-greeting.js` | The tougher greetings on an empty chat while `/evil` is on |
+| `extension/terminal.js` | The side terminal panel |
+| `extension/lib/terminal-core.js` | What a lone `cd` means, the prompt and the history of the side terminal |
 | `extension/page-controls.js` | The status pill, the composer buttons, tooltips and the mode animation |
 | `extension/menus.js` | The workspace, permission and model menus |
 | `extension/think-collapse.js` | Keeps the thinking blocks collapsed |
