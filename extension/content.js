@@ -74,12 +74,23 @@
   }
 
   function pushConfig() {
-    const env = hostInfo ? { ...hostInfo, cwd: settings.cwd, extra: settings.evilOn && extraPrompt ? extraPrompt.text : '' } : null;
+    const env = hostInfo ? { ...hostInfo, cwd: settings.cwd, extra: buildExtra() } : null;
     postToPage({ type: 'config', env, thinking: settings.thinking !== false });
   }
 
   // The user's own instructions, read from evil.txt by the host. Null until they are read.
   let extraPrompt = null;
+
+  // AGENTS.md and CLAUDE.md, in the user's folder and in the working folder and above it, as the host
+  // read them: { text, files }. They go to the model with everything else the user keeps for it.
+  let instructions = { text: '', files: [] };
+  let instructionsSeq = 0;
+  let pendingInstructions = null;
+
+  // All the text added to the hidden prompt: the instruction files, then evil.txt when it is on.
+  function buildExtra() {
+    return [instructions.text, settings.evilOn && extraPrompt ? extraPrompt.text : ''].filter(Boolean).join('\n\n');
+  }
   let pendingPromptFile = null;
   const PROMPT_ANSWER_MS = 5000;
 
@@ -113,6 +124,36 @@
     extraPrompt = answer.text ? answer : null;
     pushConfig();
     return answer;
+  }
+
+  // Asks the host for the instruction files of the current working folder. An older host that cannot
+  // read them, or one that does not answer, simply gives none.
+  function readInstructionFiles() {
+    return new Promise((resolve) => {
+      if (pendingInstructions) pendingInstructions.done({ text: '', files: [], stale: true });
+      if (!port || !hostInfo || !(hostInfo.features || []).includes('read-instructions')) {
+        resolve({ text: '', files: [] });
+        return;
+      }
+      const id = `instructions-${Date.now()}`;
+      const timer = setTimeout(() => {
+        pendingInstructions = null;
+        resolve({ text: '', files: [], error: 'The shell host did not answer.' });
+      }, PROMPT_ANSWER_MS);
+      pendingInstructions = { id, pieces: [], done: (answer) => { clearTimeout(timer); resolve(answer); } };
+      port.postMessage({ type: 'read-instructions', id, cwd: settings.cwd || hostInfo.home || '' });
+    });
+  }
+
+  // Reads them again: when the host connects and each time the working folder changes. Only the newest
+  // answer is kept, so a slow one cannot undo a later one.
+  async function loadInstructions() {
+    instructionsSeq += 1;
+    const seq = instructionsSeq;
+    const answer = await readInstructionFiles();
+    if (seq !== instructionsSeq || answer.stale) return;
+    instructions = { text: answer.text || '', files: answer.files || [] };
+    pushConfig();
   }
 
   // The red theme and the evil logos (evil.css, logos.css) show only while /evil is on, so turning it
@@ -153,6 +194,7 @@
     if (area !== 'local') return;
     if (Object.keys(changes).every((key) => !(key in DEFAULT_SETTINGS))) return;
     for (const [key, change] of Object.entries(changes)) settings[key] = change.newValue;
+    if (changes.cwd && hostInfo) loadInstructions();
     applyEvilLook();
     pushConfig();
     renderControls();
@@ -232,6 +274,17 @@
           }
         }
         break;
+      case 'instructions':
+        if (pendingInstructions && message.id === pendingInstructions.id) {
+          pendingInstructions.pieces.push(message.text || '');
+          if (!(message.part < message.parts - 1)) {
+            const done = pendingInstructions.done;
+            const text = pendingInstructions.pieces.join('');
+            pendingInstructions = null;
+            done({ text: message.error ? '' : text, files: message.files || [], error: message.error || null });
+          }
+        }
+        break;
       case 'host-status':
         hostInfo = message.connected ? message.info : null;
         hostError = message.connected ? null : message.error;
@@ -241,6 +294,7 @@
         // The file is read again each time the host connects, so an edit takes effect on a reload.
         // A page that just loaded has no text yet, so a reload reads evil.txt again.
         if (hostInfo && settings.evilOn && !extraPrompt) loadExtraPrompt();
+        if (hostInfo) loadInstructions();
         break;
       case 'started':
         store.set(message.id, { shell: message.shell, cwd: message.cwd });
@@ -854,6 +908,15 @@
     return { lines };
   }
 
+  // For /status: which instruction files the model was given, one path to a line.
+  function describeInstructions() {
+    if (!instructions.files.length) return ['Instruction files (AGENTS.md, CLAUDE.md): none found'];
+    return [
+      `Instruction files (AGENTS.md, CLAUDE.md): ${instructions.files.length} found, ${instructions.text.length} characters`,
+      ...instructions.files.map((file) => `  ${file.path}${file.cut ? ' (cut)' : ''}`),
+    ];
+  }
+
   // What to tell the user when evil.txt cannot be used.
   function describePromptProblem(answer) {
     if (answer.error === 'missing') return ['There is no evil.txt yet. Create it here and put your instructions in it:', answer.path];
@@ -952,6 +1015,7 @@
           `Workspace: ${settings.cwd || (hostInfo && hostInfo.home) || 'not set'}`,
           `Effort: ${settings.thinking === false ? 'off' : 'on'}`,
           `Thinking blocks: ${settings.collapseThinking === false ? 'left as DeepSeek shows them' : 'kept collapsed'}`,
+          ...describeInstructions(),
           `Your instructions (evil.txt): ${settings.evilOn ? (extraPrompt ? `on, ${extraPrompt.text.length} characters` : 'on, not read yet') : 'off'}`,
         ],
       }),

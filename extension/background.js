@@ -75,7 +75,7 @@ function connectHost() {
     const owner = jobOwners.get(message.id);
     if (owner) owner.postMessage(message);
     // A text sent in pieces keeps its owner until the last piece has gone through.
-    const lastPromptPiece = message.type === 'prompt-file' && !(message.part < message.parts - 1);
+    const lastPromptPiece = (message.type === 'prompt-file' || message.type === 'instructions') && !(message.part < message.parts - 1);
     if (message.type === 'exit' || message.type === 'folder-picked' || lastPromptPiece) jobOwners.delete(message.id);
   });
 
@@ -280,6 +280,15 @@ function handleTabMessage(port, message) {
       }
       jobOwners.set(message.id, port);
       nativePort.postMessage({ type: 'read-prompt', id: message.id });
+      break;
+    case 'read-instructions':
+      connectHost();
+      if (!nativePort) {
+        port.postMessage({ type: 'instructions', id: message.id, text: '', files: [], error: hostError || 'The shell host is not connected.' });
+        return;
+      }
+      jobOwners.set(message.id, port);
+      nativePort.postMessage({ type: 'read-instructions', id: message.id, cwd: message.cwd });
       break;
     case 'kill':
       if (nativePort) nativePort.postMessage(message);

@@ -97,7 +97,7 @@ A message that only starts with a slash, such as `/etc/hosts what is this file`,
 | `/feedback` | Opens the project's issue page in a new tab. |
 | `/permission` | Opens the permission presets, like the permission button. |
 | `/model` | Opens the model panel, like the model button. |
-| `/status` | Shows the extension version, the shell host, the permissions, the workspace, the effort and the thinking setting. |
+| `/status` | Shows the extension version, the shell host, the permissions, the workspace, the instruction files found, the effort and the thinking setting. |
 | `/thinking collapse` or `/thinking default` | Keeps the thinking blocks collapsed, or leaves them as DeepSeek shows them. |
 | `/evil` | Turns your own instructions for the model, read from `evil.txt`, on or off in the hidden prompt. See below. |
 | `/update` | Asks GitHub for the latest release now, and shows the update pill again if it was closed. It works even when the automatic check is off, because you are asking for it. |
@@ -107,11 +107,24 @@ A command answers in a small panel above the composer, which closes by itself or
 
 #### Your own instructions
 
-`/evil` adds a text of your own to the hidden prompt, next to the one the extension already sends. The text is in a file called `evil.txt`, in the install folder beside `host` and `extension`, and it ships with the project: the Windows setup puts it in `%LOCALAPPDATA%\DeepSeekShellTool\`, and from source it is the root of the project. Edit it to make it your own: a setup update only writes the shipped file when there is none, so your changes stay. If the file is missing, `/evil` tells you the exact path where to create it.
+`/evil` adds a text of your own to the hidden prompt, next to the one the extension already sends. The text is in a file called `evil.txt`, in the install folder beside `host` and `extension`, and it ships with the project: the Windows setup puts it in `%LOCALAPPDATA%\DeepSeekShellTool\`, and from source it is the root of the project. Edit it to make it your own: a setup update only writes the shipped file when there is none, so your changes stay. An `evil.txt` in your `.dsx` folder takes the place of that one, and no update can touch it. If the file is missing, `/evil` tells you the exact path where to create it.
 
 `/evil` takes no arguments: it switches. The square flame button next to "New chat" in the sidebar does the same, and turns red while it is on. The first time it reads the file and turns the feature on, and the next time it turns it off. The text goes out with your next message in each chat, once, and again only if it changes. It sits in a hidden block, so it never shows in the chat, and `/evil` never prints it back, only its size. The file is read again every time the page loads, so after editing it reload the page. Turning it off tells a chat that already has the text to ignore it. The file has no size limit of its own: a long text travels from the host to the extension in pieces and is joined again. DeepSeek has a limit on the length of a message that this extension cannot see, so above 100,000 characters `/evil` warns you that DeepSeek may refuse it. Only that one file is read, and the text is never taken from the web.
 
 While `/evil` is on the page wears the red look: the blue of DeepSeek becomes red, and the logo in the sidebar and the whale on an empty chat are replaced by your own (`extension/logos.css` and `extension/evil.css`). Turning `/evil` on plays a short transition (`extension/evil-awakening.js`, one second): a flickering full-screen glitch of pixel blocks in purple, magenta, blue and black covers the page, the red theme switches on underneath, then the glitch breaks up while the new logos fade in. While it is on, the greeting on an empty chat is one of five tougher lines (`extension/evil-greeting.js`) instead of DeepSeek's own. Turning it off brings the original look and greeting back at once.
+
+### Instruction files
+
+The extension reads `AGENTS.md` and `CLAUDE.md`, the files other coding agents use for standing instructions, and gives them to the model in the hidden prompt.
+
+- **For every folder.** Put them in `.dsx` in your home folder, for example `C:\Users\you\.dsx\AGENTS.md`. The folder is yours: the extension never writes in it, and an update never touches it.
+- **For one folder.** Put them in the workspace you picked, or in any folder above it up to your home folder. A project can have its own, and a folder further up can have one for all its projects.
+
+The user's files come first, then the folders from the outermost to the working folder. When two of them disagree, the one listed last wins, so the file closest to your work has the final word. In each folder `AGENTS.md` comes before `CLAUDE.md`. Only these two names are read, only in those places, and nothing else on the disk. The files of other tools, such as `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`, are not read: copy or link the text into `.dsx` if you want it here.
+
+The text goes out with your next message in each chat, once, and again only if it changes, which includes switching workspace. It sits in a hidden block, so it never shows in the chat. A file longer than 100,000 characters is cut, and together they stay under 300,000: past that, the ones furthest from the working folder are left out. `/status` lists the files that were found. They are read when the host connects and when you change workspace, so after editing one, reload the page or pick the workspace again.
+
+A file in a project folder is read as soon as you pick that folder, and it steers the model: do not pick a folder you did not write or do not trust. See Security.
 
 ### Update notice
 
@@ -158,6 +171,7 @@ Read this before you use Full access.
 - The model reads things you did not write: web search results, file contents, command output. They can contain instructions meant to steer it (prompt injection).
 - In Full access mode, a script running on chat.deepseek.com could trigger a command by forging the message the page hook sends. In Read Only mode it could only make an approval card appear. The cards live in a closed shadow root and react only to real clicks.
 - The danger labels on approval cards are pattern matches. They miss things, so read the command itself.
+- `AGENTS.md` and `CLAUDE.md` in a folder you pick are given to the model as instructions from you, without asking. A repository you downloaded can contain text meant to steer the model into running commands. Pick only folders you trust, and keep Read Only or Workspace Write for anything else. `/status` shows which files were read.
 - Everything a tool reads and everything a command prints is sent to DeepSeek's servers, secrets included. `glob` and `grep` skip common secret files. `shell` and an approved `read` do not.
 
 ## How it works
@@ -183,6 +197,7 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/background.js` | Connects tabs to the native host |
 | `host/host.js` | Runs commands and tools, streams output, enforces timeouts and kills |
 | `host/tools.js` | The `read`, `write`, `edit`, `glob` and `grep` tools |
+| `host/instructions.js` | Finds the `AGENTS.md` and `CLAUDE.md` files for the working folder |
 | `host/pick-folder.ps1` | The folder dialog on Windows |
 | `host/install.js` | Registers and removes the native host when installing from source |
 | `installer/` | The Windows setup, the Firefox package, and the build and release scripts |

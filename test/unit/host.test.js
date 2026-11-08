@@ -70,6 +70,7 @@ test('hello reports the environment', async () => {
   const { version } = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'extension', 'manifest.json'), 'utf8'));
   assert.equal(hello.extensionVersion, version);
   assert.ok(hello.features.includes('read-prompt'));
+  assert.ok(hello.features.includes('read-instructions'));
   host.stop();
 });
 
@@ -313,4 +314,60 @@ test('polling an unknown job fails cleanly', async () => {
   assert.equal(exit.status, 'spawn_error');
   assert.match(exit.error, /job-999/);
   host.stop();
+});
+
+test('the instruction files are read for the working folder, in numbered pieces', async () => {
+  const fs = require('node:fs');
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'dsx-instructions-'));
+  const userDir = path.join(folder, 'own');
+  const project = path.join(folder, 'project');
+  fs.mkdirSync(userDir);
+  fs.mkdirSync(project);
+  fs.writeFileSync(path.join(userDir, 'CLAUDE.md'), 'Always answer in Italian.');
+  fs.writeFileSync(path.join(project, 'AGENTS.md'), 'Use tabs.');
+  const host = startHost({ DSX_USER_DIR: userDir });
+  const ask = async (id, cwd) => {
+    host.send({ type: 'read-instructions', id, cwd });
+    const last = await host.waitFor((m) => m.type === 'instructions' && m.id === id && !(m.part < m.parts - 1));
+    const pieces = host.messages.filter((m) => m.type === 'instructions' && m.id === id);
+    return { files: last.files, text: pieces.map((m) => m.text).join(''), pieces: pieces.length };
+  };
+  try {
+    const found = await ask('one', project);
+    assert.deepEqual(found.files.map((file) => [file.scope, path.basename(file.path)]), [['global', 'CLAUDE.md'], ['directory', 'AGENTS.md']]);
+    assert.ok(found.text.indexOf('Always answer in Italian.') < found.text.indexOf('Use tabs.'));
+
+    // A folder that does not exist falls back to the home folder, and the user's own files still count.
+    const fallback = await ask('two', path.join(folder, 'gone'));
+    assert.deepEqual(fallback.files.map((file) => path.basename(file.path)).slice(0, 1), ['CLAUDE.md']);
+
+    // A long text arrives whole, in several pieces.
+    fs.writeFileSync(path.join(project, 'AGENTS.md'), 'é'.repeat(90_000));
+    const big = await ask('three', project);
+    assert.ok(big.pieces > 1, String(big.pieces));
+    assert.ok(big.text.includes('é'.repeat(90_000)));
+  } finally {
+    host.stop();
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('an evil.txt in the user folder is used before the shipped one', async () => {
+  const fs = require('node:fs');
+  const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsx-userdir-'));
+  fs.writeFileSync(path.join(userDir, 'evil.txt'), 'From the user folder.');
+  const host = startHost({ DSX_USER_DIR: userDir });
+  try {
+    host.send({ type: 'read-prompt', id: 'own' });
+    const own = await host.waitFor((m) => m.type === 'prompt-file' && m.id === 'own');
+    assert.equal(own.text, 'From the user folder.');
+    assert.equal(own.path, path.join(userDir, 'evil.txt'));
+    fs.rmSync(path.join(userDir, 'evil.txt'));
+    host.send({ type: 'read-prompt', id: 'shipped' });
+    const shipped = await host.waitFor((m) => m.type === 'prompt-file' && m.id === 'shipped');
+    assert.equal(shipped.path, path.join(__dirname, '..', '..', 'evil.txt'));
+  } finally {
+    host.stop();
+    fs.rmSync(userDir, { recursive: true, force: true });
+  }
 });

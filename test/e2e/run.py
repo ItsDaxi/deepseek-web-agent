@@ -18,6 +18,8 @@ EXTENSION = ROOT / "extension"
 MOCK_PAGE = (Path(__file__).parent / "mock-deepseek.html").read_text(encoding="utf-8")
 # Where the host looks for the user's own instructions (/evil) during this run.
 PROMPT_FILE = Path(tempfile.gettempdir()) / f"dsx-e2e-evil-{os.getpid()}.txt"
+# The user folder of the host (~/.dsx in real life), empty until a test puts instruction files in it.
+USER_DIR = Path(tempfile.gettempdir()) / f"dsx-e2e-user-{os.getpid()}"
 SESSION_ID = "11111111-2222-3333-4444-555555555555"
 CHAT_URL = f"https://chat.deepseek.com/a/chat/s/{SESSION_ID}"
 SCREENSHOTS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
@@ -644,6 +646,31 @@ def run(context, server):
     check("and only once", "no longer apply" not in send_and_wait("fifth message"))
     PROMPT_FILE.unlink(missing_ok=True)
 
+    # Instruction files: CLAUDE.md in the user's own folder, then an AGENTS.md in the workspace.
+    check("no instruction files, nothing added", "Additional instructions" not in send_and_wait("before any file"))
+    USER_DIR.mkdir(exist_ok=True)
+    (USER_DIR / "CLAUDE.md").write_text("Always cite the source.", encoding="utf-8")
+    reload_page()
+    first = send_and_wait("with a global file")
+    check("the user's own CLAUDE.md goes with the next message", "Always cite the source." in first and "<dsx:system>Additional instructions" in first, first[-300:])
+    check("it says which file it came from", str(USER_DIR / "CLAUDE.md") in first)
+    check("it never shows in the chat", "Always cite the source." not in visible_text(page))
+    check("it is sent once, not with every message", "Always cite the source." not in send_and_wait("and again"))
+    project = Path(tempfile.mkdtemp(prefix="dsx-e2e-project-"))
+    (project / "AGENTS.md").write_text("Use tabs.", encoding="utf-8")
+    worker.evaluate("(cwd) => chrome.storage.local.set({ cwd })", str(project))
+    pause(1)
+    in_project = send_and_wait("in the project")
+    check("a workspace with its own AGENTS.md sends it after the global one", "Use tabs." in in_project and in_project.index("Always cite the source.") < in_project.index("Use tabs."), in_project[-300:])
+    run_command("/status")
+    check("/status lists the instruction files", wait_until(lambda: "Instruction files" in shadow.text() and "AGENTS.md" in shadow.text(), message="status files"), shadow.text()[-300:])
+    worker.evaluate("() => chrome.storage.local.set({ cwd: '' })")
+    (USER_DIR / "CLAUDE.md").unlink()
+    USER_DIR.rmdir()
+    (project / "AGENTS.md").unlink()
+    project.rmdir()
+    pause(1)
+
     # A page script could fake the keys to change the permission mode, so faked ones must do nothing.
     page.fill("#composer", "/perm")
     wait_until(lambda: "Switch the permission preset" in shadow.text(), message="permission command")
@@ -758,7 +785,7 @@ def main():
                 viewport={"width": 1100, "height": 900},
                 args=[f"--disable-extensions-except={EXTENSION}", f"--load-extension={EXTENSION}", "--no-first-run"],
                 # The host inherits this, so /evil reads a file of the test and never a real one.
-                env={**os.environ, "DSX_PROMPT_FILE": str(PROMPT_FILE)},
+                env={**os.environ, "DSX_PROMPT_FILE": str(PROMPT_FILE), "DSX_USER_DIR": str(USER_DIR)},
                 **target,
             )
             try:

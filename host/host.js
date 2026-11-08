@@ -9,6 +9,7 @@ const { Worker } = require('worker_threads');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { readInstructions } = require('./instructions.js');
 
 const VERSION = '0.1.0';
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -62,15 +63,34 @@ function extensionVersion() {
 // The user's own instructions for the model, kept in a text file at the top of the install folder
 // (beside host/ and extension/), where an update does not touch it. Only this one fixed file is read.
 // DSX_PROMPT_FILE moves it, which is how the tests avoid touching a real one.
-const PROMPT_FILE = process.env.DSX_PROMPT_FILE || path.join(__dirname, '..', 'evil.txt');
+const SHIPPED_PROMPT_FILE = path.join(__dirname, '..', 'evil.txt');
+// The user's own folder, which holds their AGENTS.md and CLAUDE.md for every folder, and an evil.txt that
+// takes the place of the one shipped with the install. DSX_USER_DIR moves it, for the tests.
+const USER_DIR = process.env.DSX_USER_DIR || path.join(os.homedir(), '.dsx');
+
+// The evil.txt in the user's folder wins over the shipped one.
+function promptFilePath() {
+  if (process.env.DSX_PROMPT_FILE) return process.env.DSX_PROMPT_FILE;
+  const own = path.join(USER_DIR, 'evil.txt');
+  return fs.existsSync(own) ? own : SHIPPED_PROMPT_FILE;
+}
 
 // The file has no size limit of its own. The browser caps one message from the host at 1 MB, so the
 // text travels in pieces of MAX_CHUNK_CHARS, numbered, and the extension joins them again.
+// Sends `text` as numbered pieces of `reply`, which the extension joins again.
+function sendInPieces(reply, text) {
+  const parts = Math.max(1, Math.ceil(text.length / MAX_CHUNK_CHARS));
+  for (let part = 0; part < parts; part += 1) {
+    send({ ...reply, text: text.slice(part * MAX_CHUNK_CHARS, (part + 1) * MAX_CHUNK_CHARS), part, parts });
+  }
+}
+
 function readPromptFile({ id }) {
-  const reply = { type: 'prompt-file', id, path: PROMPT_FILE, text: null, error: null, part: 0, parts: 1 };
+  const file = promptFilePath();
+  const reply = { type: 'prompt-file', id, path: file, text: null, error: null, part: 0, parts: 1 };
   let text = '';
   try {
-    text = fs.readFileSync(PROMPT_FILE, 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n').trim();
+    text = fs.readFileSync(file, 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n').trim();
     if (!text) reply.error = 'empty';
   } catch (error) {
     reply.error = error.code === 'ENOENT' ? 'missing' : error.message;
@@ -79,10 +99,15 @@ function readPromptFile({ id }) {
     send(reply);
     return;
   }
-  const parts = Math.ceil(text.length / MAX_CHUNK_CHARS);
-  for (let part = 0; part < parts; part += 1) {
-    send({ ...reply, text: text.slice(part * MAX_CHUNK_CHARS, (part + 1) * MAX_CHUNK_CHARS), part, parts });
-  }
+  sendInPieces(reply, text);
+}
+
+// AGENTS.md and CLAUDE.md for the working folder `cwd` (the home folder when there is none): the
+// user's own, and those in the folder and above it. The answer says which files it used.
+function readInstructionFiles({ id, cwd }) {
+  const folder = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
+  const found = readInstructions({ cwd: folder, userDir: USER_DIR });
+  sendInPieces({ type: 'instructions', id, files: found.files, userDir: USER_DIR }, found.text);
 }
 
 function defaultShell() {
@@ -453,6 +478,9 @@ function handle(message) {
     case 'read-prompt':
       readPromptFile(message);
       break;
+    case 'read-instructions':
+      readInstructionFiles(message);
+      break;
     case 'pick-folder':
       try {
         pickFolder(message);
@@ -466,7 +494,7 @@ function handle(message) {
         version: VERSION,
         // What this host can do beyond running commands, so an extension newer than the host can say so
         // instead of waiting for an answer that never comes.
-        features: ['read-prompt'],
+        features: ['read-prompt', 'read-instructions'],
         extensionVersion: extensionVersion(),
         platform: process.platform,
         defaultShell: defaultShell(),
