@@ -6,7 +6,7 @@
   "description": "Unofficial Chromium extension that gives the DeepSeek web chat file and shell tools.",
   "scripts": {
     "test": "node --test \"test/unit/*.test.js\"",
-    "test:e2e": "python -I test/e2e/run.py && python -I test/e2e/update-reload.py",
+    "test:e2e": "python -I test/e2e/run.py && python -I test/e2e/update-reload.py && python -I test/e2e/helpers.py",
     "install-host": "node host/install.js",
     "uninstall-host": "node host/install.js --uninstall"
   }

@@ -31,6 +31,8 @@
     grep: { question: 'Search inside these files?', icon: 'search', action: 'Allow', verb: 'Search' },
     poll: { question: 'Read this background job?', icon: 'clock', action: 'Allow', verb: 'Poll' },
     kill: { question: 'Stop this background job?', icon: 'stop', action: 'Stop', verb: 'Stop' },
+    // A helper starts by itself, so its question only shows for a call replayed from an old chat.
+    agent: { question: 'Start a helper for this task?', icon: 'search', action: 'Start' },
   };
 
   const STYLES = `
@@ -124,6 +126,7 @@
 
   // The one-line summary of a tool call.
   function toolTitle(tool) {
+    if (tool.kind === 'agent') return `Helper: ${tool.attributes?.description || firstLine(tool.command) || 'working'}`;
     const { verb } = toolInfo(tool);
     if (!verb) return firstLine(tool.command);
     const subject = tool.kind === 'glob' || tool.kind === 'grep' ? firstLine(tool.command) : tool.path;
@@ -337,10 +340,12 @@
           card.append(toolDetail(tool));
         } else if (tool.kind === 'shell' && (tool.command.includes('\n') || tool.cwd)) {
           card.append(el('pre', { text: tool.cwd ? `# ${tool.cwd}\n${tool.command}` : tool.command }));
+        } else if (tool.kind === 'agent' && tool.command) {
+          card.append(el('pre', { text: `Task:\n${tool.command}` }));
         }
         const body = tool.error || tool.output;
         if (body) card.append(el('pre', { className: 'output', text: body }));
-        else card.append(el('div', { className: 'note', text: tool.status === 'rejected' ? 'This command did not run.' : 'No output.' }));
+        else card.append(el('div', { className: 'note', text: tool.status === 'rejected' ? 'This command did not run.' : tool.kind === 'agent' ? 'The helper left no report.' : 'No output.' }));
         if (tool.truncated) card.append(el('div', { className: 'note', text: 'Long output: the model received a shortened version.' }));
       }
       if (tool.sendFailed) {
@@ -419,6 +424,8 @@
         tool.job,
         tool.jobRunning,
         running ? null : [tool.output, tool.shell, tool.cwd],
+        // A helper has no stream of output; what its card says while it works is a note, so a new one repaints.
+        running && tool.kind === 'agent' ? tool.output : null,
       ]);
     }
 

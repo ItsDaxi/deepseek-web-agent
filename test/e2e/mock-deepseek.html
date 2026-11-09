@@ -59,7 +59,11 @@
     <script>
       // Reproduces the behavior of the real page that the extension depends on: requests through
       // XMLHttpRequest, patches parsed cumulatively from responseText, and history on load.
-      const sessionId = location.pathname.split('/').pop();
+      // A chat has its id in the address. The home page has none: its first message starts a new chat, and the
+      // address then names it, as it does on the real site.
+      const fromPath = location.pathname.split('/').pop();
+      const isNewChat = !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fromPath);
+      const sessionId = isNewChat ? `new-${Math.random().toString(36).slice(2, 10)}` : fromPath;
       const list = document.getElementById('messages');
       const composer = document.getElementById('composer');
       for (const toggle of document.querySelectorAll('.ds-toggle-button')) {
@@ -135,6 +139,7 @@
 
       function send(text) {
         busy = true;
+        if (isNewChat && lastMessageId === null) history.pushState({}, '', `/a/chat/s/${sessionId}`);
         addUser(`user-${Date.now()}`, text);
         const render = addAssistant(`assistant-${Date.now()}`);
         const fragments = [];
@@ -196,17 +201,20 @@
         }, pow);
       });
 
-      const history = new XMLHttpRequest();
-      history.open('GET', `/api/v0/chat/history_messages?chat_session_id=${sessionId}&cache_version=7&cache_reset_at=9`);
-      history.onload = () => {
-        const { chat_messages: messages } = JSON.parse(history.responseText).data.biz_data;
-        for (const message of messages) {
-          lastMessageId = message.message_id;
-          if (message.role === 'USER') addUser(`m${message.message_id}`, message.fragments[0].content);
-          else addAssistant(`m${message.message_id}`)(message.fragments);
-        }
-      };
-      history.send();
+      // The home page has no chat to load. (This is not called `history`, which would hide window.history.)
+      if (!isNewChat) {
+        const historyRequest = new XMLHttpRequest();
+        historyRequest.open('GET', `/api/v0/chat/history_messages?chat_session_id=${sessionId}&cache_version=7&cache_reset_at=9`);
+        historyRequest.onload = () => {
+          const { chat_messages: messages } = JSON.parse(historyRequest.responseText).data.biz_data;
+          for (const message of messages) {
+            lastMessageId = message.message_id;
+            if (message.role === 'USER') addUser(`m${message.message_id}`, message.fragments[0].content);
+            else addAssistant(`m${message.message_id}`)(message.fragments);
+          }
+        };
+        historyRequest.send();
+      }
     </script>
   </body>
 </html>

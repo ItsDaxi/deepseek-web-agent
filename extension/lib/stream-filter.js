@@ -175,6 +175,9 @@
     // when the reply began, and the end of the stream reports the total, for the stats line.
     let outputTokens = 0;
     let firstTokenSeen = false;
+    // What the model wrote as its answer, as it wrote it. A helper's report is the answer of its last reply.
+    let answer = '';
+    let errorSeen = false;
 
     function nextId() {
       callCount += 1;
@@ -249,6 +252,7 @@
         beginFragment(fragment.type);
         if (fragment.type === 'THINK' && typeof fragment.content === 'string' && fragment.content !== '') countThinkToken();
         if ((fragment.type === 'THINK' || fragment.type === 'RESPONSE') && typeof fragment.content === 'string' && fragment.content !== '') countOutputToken();
+        if (fragment.type === 'RESPONSE' && typeof fragment.content === 'string') answer += fragment.content;
         if (scanner && typeof fragment.content === 'string') {
           let content = scanner.push(fragment.content);
           if (index < fragments.length - 1) content += scanner.flush();
@@ -287,6 +291,7 @@
       if (isContentPath(path) && typeof patch.v === 'string' && patch.o !== 'SET' && scanner) {
         if (fragmentType === 'THINK' && patch.v !== '') countThinkToken();
         if ((fragmentType === 'THINK' || fragmentType === 'RESPONSE') && patch.v !== '') countOutputToken();
+        if (fragmentType === 'RESPONSE') answer += patch.v;
         const text = scanner.push(patch.v);
         if (text === '' && patch.p === undefined) {
           skipBlankLine = true;
@@ -308,6 +313,12 @@
       if (namedEvent === 'ready') {
         messageId = parsed.response_message_id;
         onEvent({ type: 'stream-ready', sessionId, messageId, live });
+      } else if (namedEvent === 'hint' && parsed.type === 'error') {
+        // DeepSeek refuses a message inside a normal 200 answer: "parallel_chat_limit" when a third chat
+        // generates at once, "rate_limit_reached" when messages come too fast. The page shows the text and a
+        // retry button; this reports the reason so a helper can wait and try again.
+        errorSeen = true;
+        onEvent({ type: 'stream-error', sessionId, messageId, reason: parsed.finish_reason || 'error', message: parsed.content || '', live });
       } else if (namedEvent === 'title' && rewriteTitle && typeof parsed.content === 'string') {
         const title = rewriteTitle(parsed.content);
         if (title !== parsed.content) return `data: ${JSON.stringify({ ...parsed, content: title })}\n`;
@@ -359,7 +370,7 @@
         const rest = partialLine ? rewriteLine(partialLine) : '';
         partialLine = '';
         endThink();
-        onEvent({ type: 'reply-end', sessionId, messageId, live, tokens: outputTokens, think: thinkTokens });
+        onEvent({ type: 'reply-end', sessionId, messageId, live, tokens: outputTokens, think: thinkTokens, toolCalled, answer, failed: errorSeen });
         return rest + flushFragment();
       },
     };

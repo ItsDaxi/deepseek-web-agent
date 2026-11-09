@@ -28,7 +28,11 @@
   const ENTER_ATTEMPTS = 3;
   const TITLE_MAX_CHARS = 40;
 
-  const config = { env: null, thinking: null };
+  // `agent` is true in the tab of a helper, whose chat gets no helper tool.
+  const config = { env: null, thinking: null, agent: false };
+  // The last message a helper's tab sent through the composer, kept so it can be sent again after DeepSeek
+  // refused it with a rate limit: { key, body } for a result, { text } for the opening task.
+  let lastSent = null;
   const requests = new WeakMap();
   const pendingResults = new Map();
   // The instructions already sent in each chat, by session id.
@@ -100,7 +104,7 @@
       const sent = extraSent.get(request.sessionId) || '';
       const extra = wanted && wanted !== sent ? wanted : null;
       const retire = !wanted && Boolean(sent);
-      body.prompt = Protocol.injectPrompt(body.prompt, config.env, { full, extra, retire });
+      body.prompt = Protocol.injectPrompt(body.prompt, config.env, { full, extra, retire, agents: !config.agent });
       if (extra) extraSent.set(request.sessionId, extra);
       if (retire) extraSent.delete(request.sessionId);
       // `first` is the opening message of a chat, so the stats of a chat can tell it was followed from the start.
@@ -346,6 +350,34 @@
     return !pendingResults.has(entry.key);
   }
 
+  // Sends a plain message, the opening task of a helper, through the composer. Unlike a result it carries
+  // its own text, so the hook treats it like anything the user types: it is the first message of its chat
+  // and gets the full prompt. Resolves true once the page took it.
+  async function sendText(text) {
+    const deadline = Date.now() + SEND_TIMEOUT_MS;
+    let attempt = 0;
+    while (Date.now() < deadline) {
+      const area = findComposer();
+      if (!area || activeStreams > 0) {
+        await delay(SEND_RETRY_MS);
+        continue;
+      }
+      area.setAttribute('data-dsx-sending', '');
+      setComposerValue(area, text);
+      await delay(120);
+      if (attempt < ENTER_ATTEMPTS) pressEnter(area);
+      else clickSendButton(area);
+      attempt += 1;
+      for (let waited = 0; waited < ACCEPT_WAIT_MS && area.value === text && activeStreams === 0; waited += COMPOSER_POLL_MS) {
+        await delay(COMPOSER_POLL_MS);
+      }
+      const accepted = area.value !== text || activeStreams > 0;
+      area.removeAttribute('data-dsx-sending');
+      if (accepted) return true;
+    }
+    return false;
+  }
+
   async function pumpResults() {
     if (pumping) return;
     pumping = true;
@@ -356,6 +388,7 @@
         );
         if (index === -1 || activeStreams > 0) break;
         const [entry] = resultQueue.splice(index, 1);
+        if (config.agent) lastSent = { key: entry.key, ids: entry.ids, sessionId: entry.sessionId, body: pendingResults.get(entry.key) };
         const sent = await sendThroughComposer(entry);
         if (!sent) {
           pendingResults.delete(entry.key);
@@ -385,9 +418,23 @@
     if (message.type === 'config') {
       config.env = message.env;
       config.thinking = typeof message.thinking === 'boolean' ? message.thinking : null;
+      config.agent = message.agent === true;
+    } else if (message.type === 'send-prompt') {
+      // The task is wrapped here because the protocol library only loads in the page's world.
+      lastSent = { text: message.task };
+      sendText(Protocol.buildHelperTask(message.task)).then((sent) => {
+        if (!sent) post({ type: 'prompt-failed' });
+      });
+    } else if (message.type === 'resend-last') {
+      // A result DeepSeek refused is sent again. The opening task is not: its chat has to start over.
+      if (lastSent && lastSent.key && lastSent.body) {
+        pendingResults.set(lastSent.key, lastSent.body);
+        resultQueue.push({ key: lastSent.key, ids: lastSent.ids, sessionId: lastSent.sessionId });
+        pumpResults();
+      }
     } else if (message.type === 'send-result') {
       const body = Protocol.buildResultMessage({ id: message.id, ...message.result });
-      pendingResults.set(message.id, Protocol.injectPrompt(body, config.env, { full: false }));
+      pendingResults.set(message.id, Protocol.injectPrompt(body, config.env, { full: false, agents: !config.agent }));
       resultQueue.push({ key: message.id, ids: [message.id], sessionId: message.sessionId });
       pumpResults();
     } else if (message.type === 'send-results') {
@@ -398,7 +445,7 @@
         ? Protocol.buildResultMessage({ id: results[0].id, ...results[0] })
         : Protocol.buildResultBatch(results);
       const key = results.map((result) => result.id).join('+');
-      pendingResults.set(key, Protocol.injectPrompt(body, config.env, { full: false }));
+      pendingResults.set(key, Protocol.injectPrompt(body, config.env, { full: false, agents: !config.agent }));
       resultQueue.push({ key, ids: results.map((result) => result.id), sessionId: message.sessionId });
       pumpResults();
     }

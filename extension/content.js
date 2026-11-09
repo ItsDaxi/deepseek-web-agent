@@ -17,7 +17,7 @@
   // thinking is the Effort switch, which drives DeepSeek's DeepThink. Search is always on.
   // dismissedUpdate is the release tag whose notice the user closed.
   // evilOn: the user's own instructions, read from evil.txt, are added to the hidden prompt.
-  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', evilOn: false, terminalOpen: false, terminalWidth: 440 };
+  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', evilOn: false, terminalOpen: false, terminalWidth: 440, helperRetryMs: 0 };
   const MAX_WORKSPACES = 8;
   // Used only when the model leaves out the timeout it is asked to choose.
   const FALLBACK_TIMEOUT_SECONDS = 120;
@@ -41,6 +41,53 @@
   // most the page accepts in one message, not the size of the model's window, which is taken as 1M. If the
   // settings ever name a bigger limit, that one is used.
   const CONTEXT_WINDOW_TOKENS = 1000000;
+
+  // ---- Helpers (sub-agents) ------------------------------------------------------------------
+  // A helper is a DeepSeek chat the extension opens in a tab of its own for one task. The tab runs this same
+  // script, which then works as a helper: it sends the task, runs the tool calls the model writes (only what
+  // needs no approval, since nobody is there to give it), and hands the final answer back to the chat that
+  // asked. DeepSeek lets an account generate in two chats at once, so the background script keeps at most
+  // two helpers working (lib/agent-pool.js); the main chat waits for them with nothing generating.
+  const HELPER_KEY = 'dsx-helper';
+  const HELPER_HASH = /[#&]dsx-agent=([\w.-]+)/;
+  // The model requests a helper may make before it is stopped, so a helper that loops cannot go on forever.
+  const MAX_HELPER_STEPS = 40;
+  const MAX_HELPER_RETRIES = 4;
+  // How long to wait before trying again after DeepSeek refuses a message, by the reason it gives.
+  const HELPER_RETRY_MS = { parallel_chat_limit: 20000, rate_limit_reached: 45000 };
+  const HELPER_RETRY_DEFAULT_MS = 15000;
+  const HELPER_PING_MS = 20000;
+  const HELPER_NOTE = 'A helper cannot ask the user for approval, so this was not run. If you need it, say so in your report.';
+
+  // Set in a helper's tab: { id, sent, replied, steps, retries }. Null in every other tab. It is kept in
+  // sessionStorage, which lives as long as the tab, so a reload of the page does not make it forget.
+  const helper = readHelper();
+  let helperHelloDone = false;
+  let helperFinished = false;
+  let helperRetryTimer = null;
+  let helperError = null;
+  let helperFinal = null;
+
+  function readHelper() {
+    let state = null;
+    try {
+      state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || 'null');
+    } catch {
+      state = null;
+    }
+    const named = HELPER_HASH.exec(location.hash);
+    if (named && (!state || state.id !== named[1])) state = { id: named[1], sent: false, replied: false, steps: 0, retries: 0 };
+    if (state) saveHelper(state);
+    return state;
+  }
+
+  function saveHelper(state = helper) {
+    try {
+      sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+    } catch {
+      // Storage can be blocked; the helper then loses its count when the page reloads.
+    }
+  }
 
   let settings = { ...DEFAULT_SETTINGS };
   let hostInfo = null;
@@ -103,7 +150,7 @@
 
   function pushConfig() {
     const env = hostInfo ? { ...hostInfo, cwd: settings.cwd, extra: buildExtra() } : null;
-    postToPage({ type: 'config', env, thinking: settings.thinking !== false });
+    postToPage({ type: 'config', env, thinking: settings.thinking !== false, agent: Boolean(helper) });
   }
 
   // The user's own instructions, read from evil.txt by the host. Null until they are read.
@@ -260,13 +307,15 @@
     });
     port.postMessage({ type: 'connect-host' });
     port.postMessage({ type: 'check-update' });
+    sendHelperFinal();
   }
 
   // A lost connection also loses the command's exit message, so its card must not spin forever.
   function failRunningCommands() {
     terminal.connectionLost();
     for (const tool of store.list()) {
-      if (tool.status !== 'running') continue;
+      // A helper keeps working in its own tab, and its answer waits for this tab to reconnect.
+      if (tool.status !== 'running' || tool.kind === 'agent') continue;
       finishCommand({
         id: tool.id,
         status: 'spawn_error',
@@ -333,6 +382,19 @@
         // A page that just loaded has no text yet, so a reload reads evil.txt again.
         if (hostInfo && settings.evilOn && !extraPrompt) loadExtraPrompt();
         if (hostInfo) loadInstructions();
+        helperHello();
+        break;
+      case 'agent-task':
+        if (helper && message.agentId === helper.id && !helper.sent) {
+          postToPage({ type: 'send-prompt', task: message.task });
+        }
+        break;
+      case 'agent-update':
+        // A helper waiting for a free place says so on its card.
+        if (store.get(message.id)?.status === 'running') store.set(message.id, { output: message.note || '' });
+        break;
+      case 'agent-result':
+        finishAgent(message);
         break;
       case 'started':
         store.set(message.id, { shell: message.shell, cwd: message.cwd });
@@ -425,8 +487,9 @@
   function nextInTurn() {
     const active = currentTurn();
     const states = active.ids.map((id) => [id, store.get(id)?.status]);
-    // Only one call runs at a time, and a call still being written must not be overtaken.
-    if (states.some(([, status]) => ['running', 'no-host', 'writing'].includes(status))) return;
+    // Only one call runs at a time, and a call still being written must not be overtaken. A helper that is
+    // working does not count: it touches nothing here, so the calls of the reply go on beside it.
+    if (states.some(([id, status]) => ['running', 'no-host', 'writing'].includes(status) && !isWorkingHelper(id))) return;
     // Only a queued call may start by itself. One that is awaiting a decision from the user
     // keeps waiting for it, or the order of the reply would skip the question.
     const pending = states.find(([, status]) => status === QUEUED);
@@ -436,22 +499,37 @@
     decide(id);
   }
 
+  // A helper that is working on its task.
+  function isWorkingHelper(id) {
+    const tool = store.get(id);
+    return Boolean(tool && tool.kind === 'agent' && tool.status === 'running');
+  }
+
   // Where a call goes once the ones before it are out of the way: it still has to earn its run.
+  // In a helper's tab nobody can be asked, so what would wait for the user is refused instead.
   function decide(id) {
     const tool = store.get(id);
     if (!tool) return;
+    if (helper && tool.kind === 'agent') {
+      refuseCommand(id, 'A helper cannot start other helpers. Do the work yourself, or say in your report what is left.');
+      return;
+    }
     if (isSafeRead(tool)) {
       runCommand(id);
       return;
     }
-    if (!isBypassed(tool) && !isWorkspaceWrite(tool)) return;
+    if (!isBypassed(tool) && !isWorkspaceWrite(tool)) {
+      if (helper) refuseCommand(id, HELPER_NOTE);
+      return;
+    }
 
     if (READ_ONLY_TOOLS.has(tool.kind)) {
       runCommand(id, { autoRun: true });
       return;
     }
     if (autoTurns >= settings.maxAutoTurns) {
-      store.set(id, { pausedReason: `Paused after ${settings.maxAutoTurns} automatic changes in a row.` });
+      if (helper) refuseCommand(id, `${HELPER_NOTE} (${settings.maxAutoTurns} automatic changes in a row is the limit.)`);
+      else store.set(id, { pausedReason: `Paused after ${settings.maxAutoTurns} automatic changes in a row.` });
       return;
     }
     autoTurns += 1;
@@ -528,9 +606,15 @@
     if (currentTurn().closed) turn = null;
     const active = currentTurn();
     if (!active.ids.includes(event.id)) active.ids.push(event.id);
+    // A helper starts at once, beside the other calls of the reply, so that several helpers in one reply
+    // work at the same time. The background script decides how many may.
+    if (tool.kind === 'agent' && !helper) {
+      startAgent(event.id);
+      return;
+    }
     // Anything still running or waiting holds this call back, so it does not race the ones
-    // before it over the same files.
-    if (active.ids.some((id) => id !== event.id && PENDING.has(store.get(id)?.status))) {
+    // before it over the same files. A helper that is working holds nothing back.
+    if (active.ids.some((id) => id !== event.id && PENDING.has(store.get(id)?.status) && !isWorkingHelper(id))) {
       store.set(event.id, { status: QUEUED, pausedReason: WAITING });
       return;
     }
@@ -538,9 +622,63 @@
     decide(event.id);
   }
 
+  // Hands the task to the background script, which opens the helper's chat when a place is free.
+  function startAgent(id) {
+    const tool = store.get(id);
+    if (!tool) return;
+    if (!extensionAlive()) {
+      store.set(id, { status: 'no-host', hostProblem: 'reload', pendingRun: false });
+      renderControls();
+      return;
+    }
+    if (!port || !hostInfo) {
+      if (port) port.postMessage({ type: 'connect-host' });
+      store.set(id, { status: 'no-host', hostProblem: null, pendingRun: true, autoRun: true });
+      return;
+    }
+    markExecuted(id);
+    store.set(id, { status: 'running', startedAt: Date.now(), output: '', autoRun: true, expanded: false, pausedReason: null, pendingRun: false, hostProblem: null });
+    port.postMessage({ type: 'agent-start', id, task: tool.command, description: tool.attributes?.description || '' });
+  }
+
+  // The helper's report, or the reason it ended without one, goes back to the model like any other result.
+  function finishAgent(message) {
+    const tool = store.get(message.id);
+    if (!tool || tool.status !== 'running') return;
+    const status = ['ok', 'stopped', 'timeout'].includes(message.status) ? message.status : 'failed';
+    const output = message.text || '';
+    const durationMs = Date.now() - (tool.startedAt || Date.now());
+    const updated = store.set(message.id, {
+      status,
+      durationMs,
+      output,
+      code: null,
+      truncated: output.length > MODEL_OUTPUT_LIMIT_CHARS,
+      expanded: status !== 'ok',
+    });
+    sendResult(updated, {
+      status,
+      code: null,
+      durationMs,
+      output,
+      tool: 'agent',
+      command: tool.attributes?.description || firstLineOf(tool.command),
+    });
+  }
+
+  function firstLineOf(text) {
+    return String(text || '').split('\n')[0].slice(0, 120);
+  }
+
   function runCommand(id, { autoRun = false } = {}) {
     const tool = store.get(id);
     if (!tool) return;
+    // A helper is not a command: it is started through the background script, not the shell host.
+    if (tool.kind === 'agent') {
+      if (helper) refuseCommand(id, 'A helper cannot start other helpers.');
+      else startAgent(id);
+      return;
+    }
     if (!extensionAlive()) {
       store.set(id, { status: 'no-host', hostProblem: 'reload', pendingRun: false });
       renderControls();
@@ -624,9 +762,13 @@
     postToPage({ type: 'send-result', id: tool.id, sessionId: tool.sessionId, result });
   }
 
-  function rejectCommand(id) {
+  function refuseCommand(id, note) {
     const tool = store.set(id, { status: 'rejected', expanded: false });
-    sendResult(tool, { status: 'rejected', code: null, durationMs: 0, output: '', note: 'The user rejected this. It did not run.' });
+    sendResult(tool, { status: 'rejected', code: null, durationMs: 0, output: '', note });
+  }
+
+  function rejectCommand(id) {
+    refuseCommand(id, 'The user rejected this. It did not run.');
   }
 
   function handleAction(action, id) {
@@ -647,6 +789,11 @@
         rejectCommand(id);
         break;
       case 'stop':
+        // Stopping a helper closes its chat; its card then ends with what it had.
+        if (tool.kind === 'agent') {
+          if (port) port.postMessage({ type: 'agent-cancel', id });
+          break;
+        }
         // A background shell's card must end the job itself, not just the call that started it.
         if (tool.kind === 'shell' && tool.attributes?.background === 'true' && tool.job) {
           port?.postMessage({ type: 'kill-job', job: tool.job });
@@ -659,6 +806,97 @@
       default:
         break;
     }
+  }
+
+  // ---- A helper's own tab ----------------------------------------------------------------------
+
+  // Asks the background script for the task. It is asked once for each load of the page; the answer is
+  // only used while the task has not been sent, so a reconnection never sends it twice.
+  function helperHello() {
+    if (!helper || helperHelloDone || helperFinished || !port) return;
+    helperHelloDone = true;
+    port.postMessage({ type: 'agent-hello', agentId: helper.id });
+  }
+
+  function helperStreamStart() {
+    if (!helper || helperFinished) return;
+    helperError = null;
+    helper.sent = true;
+    helper.steps += 1;
+    saveHelper();
+    if (helper.steps > MAX_HELPER_STEPS) {
+      helperFinish('failed', `The helper was stopped after ${MAX_HELPER_STEPS} requests without finishing its report.`);
+    }
+  }
+
+  // The reply is over. One that holds a tool call is not the end: the calls run and their results make the
+  // next request. One that holds none is the report. One that DeepSeek refused is tried again later.
+  function helperReplyEnd(message) {
+    if (!helper || helperFinished || message.live !== true) return;
+    if (message.failed || helperError) {
+      helperRetry(helperError || 'error');
+      return;
+    }
+    helper.replied = true;
+    saveHelper();
+    if (message.toolCalled) return;
+    const report = String(message.answer || '').trim();
+    if (!report) {
+      helperRetry('empty');
+      return;
+    }
+    helperFinish('ok', report);
+  }
+
+  // DeepSeek says no with a 200 answer: "parallel_chat_limit" when a third chat generates at once, and
+  // "rate_limit_reached" when messages come too fast. Both pass, so the message is sent again after a wait.
+  // The opening message cannot simply be sent again, because its chat is empty and the page would no longer
+  // treat the message as the first, so the tab starts over from the home page instead.
+  function helperRetry(reason) {
+    if (!helper || helperFinished || helperRetryTimer) return;
+    helper.retries += 1;
+    saveHelper();
+    if (helper.retries > MAX_HELPER_RETRIES) {
+      helperFinish('failed', `DeepSeek kept refusing the helper's messages (${reason}), so it gave up.`);
+      return;
+    }
+    // helperRetryMs is for the tests, which cannot wait the better part of a minute.
+    const wait = Number(settings.helperRetryMs) || HELPER_RETRY_MS[reason] || HELPER_RETRY_DEFAULT_MS;
+    helperRetryTimer = setTimeout(() => {
+      helperRetryTimer = null;
+      helperError = null;
+      if (helper.replied) {
+        postToPage({ type: 'resend-last' });
+        return;
+      }
+      helper.sent = false;
+      saveHelper();
+      if (location.pathname === '/') location.reload();
+      else location.href = `${location.origin}/#dsx-agent=${helper.id}`;
+    }, wait);
+  }
+
+  // Hands the report to the background script, which closes this tab and answers the chat that asked.
+  function helperFinish(status, text) {
+    if (!helper || helperFinished) return;
+    helperFinished = true;
+    clearTimeout(helperRetryTimer);
+    helperFinal = { type: 'agent-done', agentId: helper.id, status, text };
+    sendHelperFinal();
+  }
+
+  // A report that cannot go out now, because the connection is being restored, goes out when it is back.
+  function sendHelperFinal() {
+    if (!helperFinal || !port) return;
+    port.postMessage(helperFinal);
+    helperFinal = null;
+  }
+
+  if (helper) {
+    // A service worker that is not spoken to goes to sleep, and with it the count of helpers.
+    setInterval(() => {
+      if (port) port.postMessage({ type: 'agent-ping' });
+    }, HELPER_PING_MS);
   }
 
   // ---- Events from the page hook -------------------------------------------------------------
@@ -721,6 +959,14 @@
         break;
       case 'stream-start':
         chatStats.streamStart(message.sessionId, message.at);
+        helperStreamStart();
+        break;
+      case 'stream-error':
+        // DeepSeek refused the message inside a normal answer (see stream-filter.js).
+        if (helper && message.live !== false) helperError = message.reason || 'error';
+        break;
+      case 'prompt-failed':
+        if (helper) helperRetry('prompt');
         break;
       case 'first-token':
         chatStats.firstToken(message.sessionId, message.at);
@@ -728,6 +974,7 @@
       case 'reply-end':
         chatStats.replyEnd(message.sessionId, message.at, message.tokens, message.live === true);
         renderStats();
+        helperReplyEnd(message);
         break;
       case 'stream-end':
         // Nothing more arrives for this reply. The calls still queued behind one another stay

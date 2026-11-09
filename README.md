@@ -6,7 +6,7 @@ This is unofficial and has nothing to do with DeepSeek. It relies on the site's 
 
 ## What it does
 
-The extension adds a hidden prompt to your messages that teaches the model six tools: `read`, `write`, `edit`, `glob`, `grep` and `shell`. When the model uses one, the extension takes the call out of the response before the page draws it, shows a card in its place, and runs the call through a small native program on your machine. The result goes back to the model as a hidden message.
+The extension adds a hidden prompt to your messages that teaches the model six tools: `read`, `write`, `edit`, `glob`, `grep` and `shell`, plus helpers for long jobs (see Helpers). When the model uses one, the extension takes the call out of the response before the page draws it, shows a card in its place, and runs the call through a small native program on your machine. The result goes back to the model as a hidden message.
 
 The hidden prompt is added to outgoing requests and removed from the history again, so it never shows up in the chat. DeepSeek's own web search and DeepThink keep working.
 
@@ -137,6 +137,16 @@ You type at the prompt at the end of the output, as in any terminal. Up and Down
 
 It runs commands through the same native host as the model, each in a process of its own. So the folder carries over, but variables do not, and a program that waits for you to type, such as `vim` or a REPL, does not work. What it runs is never sent to the model, and nothing the model writes can reach it.
 
+### Helpers
+
+The model can hand a long job, such as searching a large codebase or reading many files to answer one question, to a helper. A helper is another DeepSeek chat, opened by the extension in a background tab. It gets the task, works with the same tools and sends back a plain-text report, which reaches the main chat like any other result. Only the report counts against the main chat's context, not everything the helper read. The card in the main chat is titled `Helper: <description>`, and its Stop button closes the helper's tab.
+
+Two things come from DeepSeek, measured on a real account rather than documented: an account can generate in **two chats at once**, and it refuses messages that come too fast (about 14 a minute in one test). So at most **2 helpers** work at the same time, not counting the main chat, which has nothing generating while it waits for its helpers. A third helper waits for a free place. When DeepSeek refuses a helper's message anyway (it does so inside a normal answer, with `parallel_chat_limit` or `rate_limit_reached`), the helper waits and sends it again, up to 4 times, then gives up with a report that says why.
+
+A helper has no one to ask, so what would wait for your approval is refused instead, and the model is told so. In Read Only mode that means a helper reads inside the workspace and nothing else; Workspace Write also lets it edit there; Full access lets it do anything, like the main chat. "Always allow in this chat" does not carry over to a helper. A helper cannot start helpers. It is stopped after 40 requests or 20 minutes, and closing the main chat's tab stops its helpers.
+
+A helper's chat shows up in your DeepSeek history like any other.
+
 ### Update notice
 
 When you open DeepSeek, the extension asks GitHub for the latest release of this repository. If it is newer than the installed version, a blue "Update available" pill appears at the top right, next to the status pill. Click it to open the release page on GitHub, download the new setup there and run it. Close it with the × and it stays closed until the next release.
@@ -221,6 +231,8 @@ The model writes `<dsx:shell timeout="30">command</dsx:shell>`, with optional `c
 
 A reply can hold several tool tags. They run one at a time, in the order the model wrote them, so a batch that touches the same files behaves predictably. All the results go back in one message, and the 20,000-character budget is shared between them, keeping the start and the end of each.
 
+`<dsx:agent description="short title">task</dsx:agent>` hands a self-contained job to a helper. The exception to the one-at-a-time rule above: helpers start at once and run beside the other calls of the reply, so several in one reply work in parallel. See Helpers.
+
 `<dsx:shell background="true">` starts something that keeps running, such as a dev server, and answers at once with a job id like `job-1`. `<dsx:poll id="job-1" wait="30">` returns what the job printed since the last poll, waiting up to 60 seconds for something new, and says whether it is still running. `<dsx:kill id="job-1">` stops it. Background jobs have no timeout, keep their last 512 KB of output, and stop when the browser closes the connection. The Stop button on a running card ends the job too.
 
 ## Tests
@@ -233,7 +245,7 @@ npm test
 npm run test:e2e
 ```
 
-The end-to-end test needs Python with Playwright and its Chromium. It loads the real extension and the real native host against a mock of DeepSeek (`test/e2e/mock-deepseek.html`). It registers the host for Playwright's Chromium only, and removes that registration when it ends. It does not touch the real site. Tests that open the real folder dialog on your screen only run with `DSX_TEST_DIALOG=1`.
+The end-to-end test needs Python with Playwright and its Chromium. It loads the real extension and the real native host against a mock of DeepSeek (`test/e2e/mock-deepseek.html`). `helpers.py` covers the helpers: three at once with two places, a refused command, and DeepSeek refusing messages. It registers the host for Playwright's Chromium only, and removes that registration when it ends. It does not touch the real site. Tests that open the real folder dialog on your screen only run with `DSX_TEST_DIALOG=1`.
 
 `test/manual/context-probe.js` is not a test but a measurement. The limit in the model panel comes from the page's model settings, which is not a promise about the real context window. The probe sends one message of about 1,000,000 tokens from your own page, with five codes hidden in it, and reports what DeepSeek counted, whether it refused the message, and which codes the model could read back. The steps to run it are at the top of the file. It uses your account: only run it when you want that.
 

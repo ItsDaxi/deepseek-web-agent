@@ -3,7 +3,7 @@
 
 // Chromium runs this file as a service worker and loads the library here. Firefox runs it as an event
 // page, where the manifest lists lib/update-check.js before this file, so it is already loaded.
-if (typeof importScripts === 'function') importScripts('lib/update-check.js');
+if (typeof importScripts === 'function') importScripts('lib/update-check.js', 'lib/agent-pool.js');
 
 const HOST_NAME = 'com.dsx.shell_host';
 const ALLOWED_ORIGIN = 'https://chat.deepseek.com';
@@ -238,7 +238,142 @@ reloadTabsAfterUpdate();
 chrome.runtime.onInstalled.addListener(() => { reloadTabsAfterUpdate(); });
 chrome.runtime.onStartup.addListener(() => { reloadTabsAfterUpdate(); });
 
+// ---- Helpers (sub-agents) ------------------------------------------------------------------------
+// A chat asks for a helper with <dsx:agent>. The pool (lib/agent-pool.js) lets two work at the same time,
+// because DeepSeek refuses a third chat that generates at once, and keeps the rest waiting. A helper is a
+// DeepSeek chat in a background tab whose address carries #dsx-agent=<id>; content.js sees that and works
+// as a helper. Its report goes back to the tab that asked.
+
+const OWNER_GRACE_MS = 15 * 1000;
+const MAX_REPORT_CHARS = 200 * 1000;
+const helperTabs = new Map();
+const waitingForOwner = new Map();
+const ownerTimers = new Map();
+
+function tabIdOf(port) {
+  return port.sender && port.sender.tab ? port.sender.tab.id : undefined;
+}
+
+function portsOfTab(tabId) {
+  return [...tabPorts].filter((port) => tabIdOf(port) === tabId);
+}
+
+// Tells the tab that asked for a helper. A page that is reloading has no connection for a moment, so a
+// report that finds none waits there until the page is back.
+function tellOwner(job, message) {
+  const ports = portsOfTab(job.owner);
+  if (ports.length) {
+    for (const port of ports) port.postMessage(message);
+    return;
+  }
+  if (message.type !== 'agent-result') return;
+  waitingForOwner.set(job.owner, [...(waitingForOwner.get(job.owner) || []), message]);
+}
+
+const helperPool = DsxAgentPool.createAgentPool({
+  open: async (job) => {
+    const tab = await chrome.tabs.create({ url: `${PAGE_ORIGIN_PREFIX}#dsx-agent=${job.id}`, active: false });
+    // The job may have been stopped while its tab was being made.
+    if (!helperPool.get(job.id)) {
+      chrome.tabs.remove(tab.id).catch(() => {});
+      return;
+    }
+    job.tabId = tab.id;
+    helperTabs.set(tab.id, job.id);
+  },
+  close: (job) => {
+    if (job.tabId === undefined) return null;
+    helperTabs.delete(job.tabId);
+    return chrome.tabs.remove(job.tabId);
+  },
+  onUpdate: (job, state) => {
+    tellOwner(job, { type: 'agent-update', id: job.toolId, note: state === 'queued' ? 'Waiting: two helpers are already working.' : '' });
+  },
+  onDone: (job, result) => {
+    logDiagnostic('helper-done', result.status);
+    tellOwner(job, { type: 'agent-result', id: job.toolId, status: result.status, text: result.text });
+  },
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  const jobId = helperTabs.get(tabId);
+  if (!jobId) return;
+  helperTabs.delete(tabId);
+  helperPool.finish(jobId, { status: 'failed', text: "The helper's tab was closed before it finished." });
+});
+
+function startHelper(port, message) {
+  const owner = tabIdOf(port);
+  if (owner === undefined) return;
+  const task = String(message.task || '').trim();
+  if (!task) {
+    port.postMessage({ type: 'agent-result', id: message.id, status: 'failed', text: 'The helper was given no task.' });
+    return;
+  }
+  const id = `${owner}-${message.id}`.replace(/[^\w.-]/g, '_');
+  helperPool.submit({ id, toolId: message.id, owner, task, description: String(message.description || '') });
+}
+
+function answerHelperHello(port, message) {
+  const job = helperPool.get(message.agentId);
+  if (job) {
+    port.postMessage({ type: 'agent-task', agentId: job.id, task: job.task });
+    return;
+  }
+  // A helper tab nobody is waiting for any more, for instance after the worker restarted, is closed.
+  const tabId = tabIdOf(port);
+  if (tabId !== undefined) chrome.tabs.remove(tabId).catch(() => {});
+}
+
+function handleHelperMessage(port, message) {
+  switch (message.type) {
+    case 'agent-start':
+      startHelper(port, message);
+      break;
+    case 'agent-cancel':
+      helperPool.cancel(`${tabIdOf(port)}-${message.id}`.replace(/[^\w.-]/g, '_'));
+      break;
+    case 'agent-hello':
+      answerHelperHello(port, message);
+      break;
+    case 'agent-done':
+      helperPool.finish(message.agentId, {
+        status: message.status === 'ok' ? 'ok' : 'failed',
+        text: String(message.text || '').slice(0, MAX_REPORT_CHARS),
+      });
+      break;
+    default:
+      // 'agent-ping' says nothing: it only keeps the worker awake while a helper is working.
+      break;
+  }
+}
+
+// A page that reconnects gets the reports that came while it was away. One that stays away is closed,
+// and the helpers it asked for are stopped, since nobody is waiting for them.
+function ownerConnected(tabId) {
+  clearTimeout(ownerTimers.get(tabId));
+  ownerTimers.delete(tabId);
+  const messages = waitingForOwner.get(tabId);
+  waitingForOwner.delete(tabId);
+  for (const message of messages || []) for (const port of portsOfTab(tabId)) port.postMessage(message);
+}
+
+function ownerDisconnected(tabId) {
+  if (tabId === undefined || portsOfTab(tabId).length) return;
+  clearTimeout(ownerTimers.get(tabId));
+  ownerTimers.set(tabId, setTimeout(() => {
+    ownerTimers.delete(tabId);
+    if (portsOfTab(tabId).length) return;
+    waitingForOwner.delete(tabId);
+    helperPool.cancelOwnedBy(tabId);
+  }, OWNER_GRACE_MS));
+}
+
 function handleTabMessage(port, message) {
+  if (typeof message.type === 'string' && message.type.startsWith('agent-')) {
+    handleHelperMessage(port, message);
+    return;
+  }
   switch (message.type) {
     case 'reload-state':
       if (reloadQuery) reloadQuery.answer(port, message.busy !== false);
@@ -313,9 +448,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
   logDiagnostic('tab-connected', sender.origin);
   tabPorts.add(port);
+  if (tabIdOf(port) !== undefined) ownerConnected(tabIdOf(port));
   port.onMessage.addListener((message) => handleTabMessage(port, message));
   port.onDisconnect.addListener(() => {
     tabPorts.delete(port);
+    ownerDisconnected(tabIdOf(port));
     // Closing the tab stops whatever it started.
     for (const [id, owner] of jobOwners) {
       if (owner === port) {
