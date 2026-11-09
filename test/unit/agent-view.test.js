@@ -102,3 +102,31 @@ test('the summary counts what is working, done, failed and stopped', () => {
   assert.equal(isWorking(list), true);
   assert.equal(isWorking([{ state: 'ok' }]), false);
 });
+
+test('a finished helper can be taken off the list, and a working one cannot', () => {
+  const registry = createAgentRegistry();
+  registry.add({ id: 'a', toolId: 't1', owner: 1, state: 'ok' });
+  registry.add({ id: 'b', toolId: 't2', owner: 1, state: 'running' });
+  registry.add({ id: 'c', toolId: 't3', owner: 1, state: 'queued' });
+  registry.add({ id: 'd', toolId: 't4', owner: 2, state: 'failed' });
+  assert.equal(registry.dismiss(1, 't2'), false);
+  assert.equal(registry.dismiss(1, 't3'), false);
+  assert.equal(registry.dismiss(1, 'nope'), false);
+  // Another tab's helper is not reachable from this one.
+  assert.equal(registry.dismiss(1, 't4'), false);
+  assert.equal(registry.dismiss(1, 't1'), true);
+  assert.deepEqual(registry.snapshot(1).map((entry) => entry.id), ['t2', 't3']);
+  assert.equal(registry.snapshot(2).length, 1);
+});
+
+test('clearing the finished helpers leaves the working ones and the other tabs alone', () => {
+  const registry = createAgentRegistry();
+  registry.add({ id: 'a', toolId: 't1', owner: 1, state: 'ok' });
+  registry.add({ id: 'b', toolId: 't2', owner: 1, state: 'stopped' });
+  registry.add({ id: 'c', toolId: 't3', owner: 1, state: 'running' });
+  registry.add({ id: 'd', toolId: 't4', owner: 2, state: 'ok' });
+  assert.equal(registry.clearFinished(1), 2);
+  assert.deepEqual(registry.snapshot(1).map((entry) => entry.id), ['t3']);
+  assert.equal(registry.snapshot(2).length, 1);
+  assert.equal(registry.clearFinished(1), 0);
+});

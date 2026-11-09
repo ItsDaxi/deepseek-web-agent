@@ -67,9 +67,31 @@
       }));
     }
 
+    // Takes one finished helper off the list. A helper that is queued or working cannot be removed: it
+    // is stopped from its card, and then it is finished.
+    function dismiss(owner, toolId) {
+      const entry = owned(owner).find((candidate) => candidate.toolId === toolId);
+      if (!entry || ACTIVE_STATES.has(entry.state)) return false;
+      entries.delete(entry.id);
+      return true;
+    }
+
+    // Takes every finished helper of a tab off the list, and says how many it was.
+    function clearFinished(owner) {
+      let removed = 0;
+      for (const entry of owned(owner)) {
+        if (ACTIVE_STATES.has(entry.state)) continue;
+        entries.delete(entry.id);
+        removed += 1;
+      }
+      return removed;
+    }
+
     return {
       add,
       update,
+      dismiss,
+      clearFinished,
       snapshot,
       get: (id) => entries.get(id) || null,
       findByTool: (owner, toolId) => owned(owner).find((entry) => entry.toolId === toolId) || null,

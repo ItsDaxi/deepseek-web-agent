@@ -1192,6 +1192,9 @@
     onToggleTerminal: () => terminal.toggle(),
     // A row of the Agents menu: the helper's tab comes to the front, or its chat opens in a new one.
     onOpenAgent: (id) => { if (port) port.postMessage({ type: 'agent-open', id }); },
+    // The X on a finished helper, and "Clear finished": they only take helpers off the list.
+    onDismissAgent: (id) => { if (port) port.postMessage({ type: 'agent-dismiss', id }); },
+    onClearAgents: () => { if (port) port.postMessage({ type: 'agent-clear' }); },
     // The way back from a helper's tab, or from the chat of a helper that ended, to the main chat.
     onBack: () => { if (port) port.postMessage({ type: 'agent-back' }); },
   });

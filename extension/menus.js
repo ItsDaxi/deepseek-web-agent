@@ -72,6 +72,15 @@
     .item.agent .state.queued, .item.agent .state.stopped { color: var(--dsw-alias-label-caption, #81858c); }
     .item.agent.static { cursor: default; }
     .item.agent.static:hover { background: none; }
+    .item.agent .dismiss {
+      display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; margin: -4px -4px -4px 0;
+      border-radius: 6px; cursor: pointer; opacity: .55; color: var(--dsw-alias-label-tertiary, #adb2b8);
+      transition: background-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, cubic-bezier(.4, 0, .2, 1)), opacity .2s ease;
+    }
+    .item.agent .dismiss svg { width: 14px; height: 14px; }
+    .item.agent:hover .dismiss, .item.agent[aria-selected="true"] .dismiss { opacity: 1; }
+    .item.agent .dismiss:hover { background-color: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, .08)); color: var(--dsw-alias-label-primary, #f9fafb); }
+    .item.agent .chev + .dismiss { margin-left: 0; }
     .caption { padding: 6px 10px 4px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption, #81858c); }
     @keyframes spin { to { transform: rotate(360deg); } }
     .tick, .chev { margin-left: auto; }
@@ -197,6 +206,7 @@
     }
 
     const STATE_ICONS = { running: 'spinner', queued: 'clock', ok: 'check', failed: 'x', timeout: 'x', stopped: 'ban' };
+    const WORKING_STATES = new Set(['queued', 'running']);
 
     // How the figures of a helper are written, shared by the first draw and by the ticks.
     function describe(entry) {
@@ -223,15 +233,38 @@
       } else {
         node.classList.add('static');
       }
+      // A helper that has ended can be taken off the list. This only removes it from here: its chat stays in
+      // DeepSeek's history. The menu stays open, so several can be removed in a row.
+      if (!WORKING_STATES.has(entry.state)) {
+        const remove = el('span', 'dismiss');
+        remove.dataset.action = 'agent-dismiss';
+        remove.setAttribute('role', 'button');
+        remove.setAttribute('aria-label', `Remove ${row.title} from the list`);
+        remove.title = 'Remove from the list';
+        remove.append(svgNode('x'));
+        remove.addEventListener('mousedown', (event) => event.preventDefault());
+        remove.addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (event.isTrusted) actions.dismissAgent(entry.id);
+        });
+        node.append(remove);
+        node.dismiss = () => actions.dismissAgent(entry.id);
+      }
       return node;
     }
 
     function renderAgents() {
       const state = getState();
+      const entries = state.agents || [];
       const list = el('div', 'list');
       list.setAttribute('role', 'menu');
-      list.append(...(state.agents || []).map(agentRow));
-      panel.replaceChildren(list, el('div', 'sep'), el('div', 'caption', 'Up to 2 helpers work at the same time.'));
+      list.append(...entries.map(agentRow));
+      const parts = [list, el('div', 'sep')];
+      if (entries.some((entry) => !WORKING_STATES.has(entry.state))) {
+        parts.push(item('Clear finished', { action: 'agents-clear', iconName: 'x', pick: () => actions.clearAgents() }));
+      }
+      parts.push(el('div', 'caption', 'Up to 2 helpers work at the same time.'));
+      panel.replaceChildren(...parts);
     }
 
     // Keeps the times of the working helpers running, one second at a time, without drawing the list again,
@@ -422,6 +455,13 @@
         event.preventDefault();
         const node = nodes[active.selected];
         if (node && node.pick) node.pick();
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && active.kind === 'agents') {
+        // Takes the highlighted helper off the list, when it has ended.
+        const node = nodes[active.selected];
+        if (node && node.dismiss) {
+          event.preventDefault();
+          node.dismiss();
+        }
       } else if (event.key === 'Tab') {
         // The panel is a small world of its own: Tab does not wander off into the page behind it.
         event.preventDefault();

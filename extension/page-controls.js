@@ -473,7 +473,7 @@
     return iconMarkup('chevronDown').replace('<svg ', '<svg class="chev" ');
   }
 
-  function createPageControls({ onPickFolder, onChangeMode, onSelectWorkspace, onSetThinking, onDismissUpdate, onToggleEvil, onToggleTerminal, onOpenAgent, onBack }) {
+  function createPageControls({ onPickFolder, onChangeMode, onSelectWorkspace, onSetThinking, onDismissUpdate, onToggleEvil, onToggleTerminal, onOpenAgent, onDismissAgent, onClearAgents, onBack }) {
     const { MODES, MODEL_NAME, DEFAULT_WORKSPACE, basename, modeLabel } = root.DsxMenus;
     const pill = attach(
       'dsx-status',
@@ -570,6 +570,8 @@
       getState: () => ({ ...current, context: contextUsage, agents: agentList }),
       actions: {
         openAgent: (id) => onOpenAgent(id),
+        dismissAgent: (id) => onDismissAgent(id),
+        clearAgents: () => onClearAgents(),
         selectMode: (next) => {
           if (next === current.mode) return;
           playModeWave(next);

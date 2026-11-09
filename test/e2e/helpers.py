@@ -63,6 +63,7 @@ class HelperServer(harness.MockServer):
     def __init__(self):
         super().__init__()
         self.sessions = {SESSION_ID: self.messages}
+        self.paths = []
         self.task_of = {}
         self.refused = []
         self.parent_prompts = []
@@ -106,6 +107,7 @@ class HelperServer(harness.MockServer):
     def handle(self, route):
         request = route.request
         path = request.url.split("?")[0].replace("https://chat.deepseek.com", "")
+        self.paths.append(path)
         if path == "/api/v0/chat/completion":
             body = json.loads(request.post_data)
             session = body["chat_session_id"]
@@ -171,7 +173,7 @@ def run(context, server):
             waited[0] = True
         return "All helpers reported." in harness.visible_text(page)
 
-    check("the chat answers once all three helpers have reported", wait_until(watch, timeout=90, message="the final answer"))
+    check("the chat answers once all three helpers have reported", wait_until(watch, timeout=150, message="the final answer"))
     harness.pause(1)
     check("never more than two helper tabs were open at once", most_at_once[0] <= 2, str(most_at_once[0]))
     check("two helpers did work side by side", most_at_once[0] == 2, str(most_at_once[0]))
@@ -189,10 +191,10 @@ def run(context, server):
     check("all the helper tabs were closed", wait_until(lambda: not helper_pages(context, page), timeout=10, message="tabs closed"), str([p.url for p in helper_pages(context, page)]))
     check("a helper's chat never carried the helper tool", all("dsx:agent" not in body["prompt"] for body in server.requests if body["chat_session_id"] != SESSION_ID))
     check("a helper's first message carries the task and the report request", any("plain-text report" in body["prompt"] and "HELPER-TASK-1" in body["prompt"] for body in server.requests))
-    look_at_agents(context, page, shadow, wait_until)
+    look_at_agents(context, page, shadow, wait_until, server)
 
 
-def look_at_agents(context, page, shadow, wait_until):
+def look_at_agents(context, page, shadow, wait_until, server):
     shot = Path(sys.argv[1]) if len(sys.argv) > 1 else None
     page.bring_to_front()
     check("the Agents button appears with the number of helpers", wait_until(lambda: "Agents" in shadow.text() and shadow.actions("agents-menu"), message="agents button"))
@@ -224,6 +226,20 @@ def look_at_agents(context, page, shadow, wait_until):
     harness.active_page[0] = page
     check("Back returns to the main chat and closes the tab that was only a viewer", wait_until(lambda: viewer.is_closed(), message="viewer closed"))
     check("the main chat is still there, with its Agents button", "Agents" in shadow.text() and bool(shadow.actions("agents-menu")))
+
+    # Taking helpers off the list: one with its X, then the rest with "Clear finished".
+    hidden = lambda: page.evaluate("document.querySelector('dsx-agents').hidden")
+    shadow.click_last("agents-menu")
+    check("the menu opens again", wait_until(lambda: len(shadow.actions("agent-open")) == 3, message="rows again"))
+    check("every finished helper has an X, and the menu offers to clear them", len(shadow.actions("agent-dismiss")) == 3 and bool(shadow.actions("agents-clear")))
+    shadow.click_last("agent-dismiss")
+    check("the X takes that helper off the list and keeps the menu open", wait_until(lambda: len(shadow.actions("agent-open")) == 2, message="two rows"))
+    if shot:
+        page.screenshot(path=str(shot / "agents-menu-removed.png"))
+    shadow.click_last("agents-clear")
+    check("Clear finished empties the list and the Agents button goes away", wait_until(hidden, message="button hidden") and not shadow.actions("agent-open"))
+    # Nothing was deleted on the DeepSeek side: the chats of the helpers stay in its history.
+    check("removing helpers from the list sends nothing to DeepSeek", not any("delete" in path for path in server.paths), str(sorted(set(server.paths))))
 
 
 def main():

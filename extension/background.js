@@ -415,6 +415,13 @@ function handleHelperMessage(port, message) {
     case 'agent-open':
       openHelper(port, message);
       break;
+    case 'agent-dismiss':
+      // Only takes the helper off the list. Its chat stays in the DeepSeek history.
+      if (tabIdOf(port) !== undefined && helperRegistry.dismiss(tabIdOf(port), message.id)) pushAgents(tabIdOf(port));
+      break;
+    case 'agent-clear':
+      if (tabIdOf(port) !== undefined && helperRegistry.clearFinished(tabIdOf(port))) pushAgents(tabIdOf(port));
+      break;
     case 'agent-back':
       backToOwner(port);
       break;
