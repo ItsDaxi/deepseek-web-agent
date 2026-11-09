@@ -389,6 +389,13 @@
           postToPage({ type: 'send-prompt', task: message.task });
         }
         break;
+      case 'agents':
+        agentList = Array.isArray(message.list) ? message.list : [];
+        renderAgents();
+        break;
+      case 'agent-viewer':
+        controls.setBack(true);
+        break;
       case 'agent-update':
         // A helper waiting for a free place says so on its card.
         if (store.get(message.id)?.status === 'running') store.set(message.id, { output: message.note || '' });
@@ -818,12 +825,28 @@
     port.postMessage({ type: 'agent-hello', agentId: helper.id });
   }
 
-  function helperStreamStart() {
+  // Tells the background script which chat this helper is in and how many tokens it has used, for the Agents
+  // menu of the chat that asked. The figures are the same ones the stats line under the composer shows.
+  function helperProgress(sessionId) {
+    if (!helper || helperFinished || !port || !sessionId) return;
+    const summary = chatStats.summary(sessionId);
+    port.postMessage({
+      type: 'agent-progress',
+      agentId: helper.id,
+      sessionId,
+      steps: summary ? summary.steps : helper.steps,
+      output: summary ? summary.output : 0,
+      input: summary ? summary.input : null,
+    });
+  }
+
+  function helperStreamStart(sessionId) {
     if (!helper || helperFinished) return;
     helperError = null;
     helper.sent = true;
     helper.steps += 1;
     saveHelper();
+    helperProgress(sessionId);
     if (helper.steps > MAX_HELPER_STEPS) {
       helperFinish('failed', `The helper was stopped after ${MAX_HELPER_STEPS} requests without finishing its report.`);
     }
@@ -959,7 +982,7 @@
         break;
       case 'stream-start':
         chatStats.streamStart(message.sessionId, message.at);
-        helperStreamStart();
+        helperStreamStart(message.sessionId);
         break;
       case 'stream-error':
         // DeepSeek refused the message inside a normal answer (see stream-filter.js).
@@ -974,6 +997,7 @@
       case 'reply-end':
         chatStats.replyEnd(message.sessionId, message.at, message.tokens, message.live === true);
         renderStats();
+        helperProgress(message.sessionId);
         helperReplyEnd(message);
         break;
       case 'stream-end':
@@ -1003,6 +1027,7 @@
         chatStats.usage(message.sessionId, message.tokens);
         renderContext();
         renderStats();
+        helperProgress(message.sessionId);
         break;
       case 'context-limit':
         contextLimit = Math.max(message.tokens, CONTEXT_WINDOW_TOKENS);
@@ -1084,6 +1109,7 @@
     controls.mount();
     renderContext();
     renderStats();
+    renderAgents();
     thinkCounter.schedule();
   }).observe(document, { childList: true, subtree: true, characterData: true });
 
@@ -1164,7 +1190,24 @@
     onDismissUpdate: (tag) => saveSettings({ dismissedUpdate: tag }),
     onToggleEvil: toggleEvilFromButton,
     onToggleTerminal: () => terminal.toggle(),
+    // A row of the Agents menu: the helper's tab comes to the front, or its chat opens in a new one.
+    onOpenAgent: (id) => { if (port) port.postMessage({ type: 'agent-open', id }); },
+    // The way back from a helper's tab, or from the chat of a helper that ended, to the main chat.
+    onBack: () => { if (port) port.postMessage({ type: 'agent-back' }); },
   });
+
+  // ---- Agents menu -----------------------------------------------------------------------------
+  // The background script keeps the list of helpers for this tab. The page shows the ones of the chat that
+  // is open, so another chat in the same tab does not list them.
+  let agentList = [];
+
+  function renderAgents() {
+    const match = SESSION_IN_PATH.exec(location.pathname);
+    controls.setAgents(globalThis.DsxAgentView.visibleAgents(helper ? [] : agentList, match ? match[0] : null));
+  }
+
+  // A helper's tab and a tab opened to look at a helper's chat both offer the way back.
+  if (helper) controls.setBack(true);
 
   // The Evil Mode button in the sidebar does what /evil does and answers in the same small panel.
   let evilBusy = false;

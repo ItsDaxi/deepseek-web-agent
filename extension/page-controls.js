@@ -25,6 +25,13 @@
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 12h1v4h1"/>',
     terminal: '<path d="M5 7l5 5l-5 5"/><path d="M12 17h7"/>',
     flame: '<path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z"/>',
+    // The Agents button: a small robot, the head with an antenna and two eyes.
+    agents: '<path d="M6 8h12a2 2 0 0 1 2 2v7a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-7a2 2 0 0 1 2 -2z"/><path d="M12 8v-4"/><path d="M12 4h.01"/><path d="M9 13v.01"/><path d="M15 13v.01"/><path d="M9.5 16.5h5"/>',
+    arrowLeft: '<path d="M5 12h14"/><path d="M5 12l6 6"/><path d="M5 12l6 -6"/>',
+    spinner: '<path d="M12 3a9 9 0 1 0 9 9"/>',
+    x: '<path d="M18 6l-12 12"/><path d="M6 6l12 12"/>',
+    clock: '<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M12 7v5l2 2"/>',
+    ban: '<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M5.7 5.7l12.6 12.6"/>',
   };
 
   // The buttons of the composer row are quiet: no border until the mouse is over them, like the
@@ -50,6 +57,22 @@
     svg.chev { width: 12px; height: 12px; opacity: .7; }
     button.round svg { width: 17px; height: 17px; }
     @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+  `;
+
+  // The Agents button sits beside the workspace, in the same style. A count says how many helpers the chat
+  // has, and a small pulsing dot says some are still working. It stays hidden until there is one.
+  const AGENTS_STYLES = `
+    :host([hidden]) { display: none; }
+    .count {
+      min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; box-sizing: border-box;
+      font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
+      color: var(--dsw-alias-brand-text, #679efe);
+      background: color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 18%, transparent);
+    }
+    .live { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--dsw-alias-brand-text, #679efe); animation: pulse 1.4s ease-in-out infinite; }
+    .live[hidden] { display: none; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
+    @media (prefers-reduced-motion: reduce) { .live { animation: none; } }
   `;
 
   // The Evil Mode button, next to "New chat" in the sidebar. It takes the height of the row, so it stays
@@ -111,6 +134,10 @@
   // there is one. Both share one fixed row, so they never overlap whatever their width.
   const PILL_STYLES = `
     :host { position: fixed; top: 12px; right: calc(16px + var(--dsx-terminal-width, 0px)); z-index: 2147483000; display: flex; align-items: center; gap: 8px; }
+    .back { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 8px; border-radius: 999px; cursor: pointer; outline: none; font: 500 12px/18px Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--dsw-alias-brand-text, #679efe); border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 55%, transparent); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 14%, transparent); transition: background .2s ease; }
+    .back:hover { background: color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 24%, transparent); }
+    .back:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); }
+    .back[hidden] { display: none; }
     .term { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border-radius: 999px; cursor: pointer; outline: none; color: var(--dsw-alias-label-secondary, #cfd3d6); background: var(--dsw-specific-tip, #353638); border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.06)); transition: background .2s ease, color .2s ease, border .2s ease; }
     .term:hover { color: var(--dsw-alias-label-primary, #f9fafb); }
     .term:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); }
@@ -125,7 +152,7 @@
     .update button:hover { background: color-mix(in srgb, var(--dsw-alias-brand-primary, #5686fe) 24%, transparent); }
     .update a:focus-visible, .update button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5686fe); outline-offset: 1px; }
     svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    @media (prefers-reduced-motion: reduce) { .update { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { .update, .back { transition: none; } }
   `;
 
   // The line under the composer in a conversation: turns, time, speed and tokens. Quiet text, centred
@@ -446,14 +473,15 @@
     return iconMarkup('chevronDown').replace('<svg ', '<svg class="chev" ');
   }
 
-  function createPageControls({ onPickFolder, onChangeMode, onSelectWorkspace, onSetThinking, onDismissUpdate, onToggleEvil, onToggleTerminal }) {
+  function createPageControls({ onPickFolder, onChangeMode, onSelectWorkspace, onSetThinking, onDismissUpdate, onToggleEvil, onToggleTerminal, onOpenAgent, onBack }) {
     const { MODES, MODEL_NAME, DEFAULT_WORKSPACE, basename, modeLabel } = root.DsxMenus;
     const pill = attach(
       'dsx-status',
       PILL_STYLES,
-      `<span class="update" hidden><a target="_blank" rel="noopener noreferrer">${iconMarkup('arrowUp')}<span></span></a><button type="button" aria-label="Dismiss" data-action="dismiss-update">×</button></span><button type="button" class="term" data-action="toggle-terminal" aria-label="Terminal" aria-pressed="false">${iconMarkup('terminal')}</button><div class="status"><i></i><span></span></div>`,
+      `<button type="button" class="back" data-action="agents-back" hidden>${iconMarkup('arrowLeft')}<span>Main chat</span></button><span class="update" hidden><a target="_blank" rel="noopener noreferrer">${iconMarkup('arrowUp')}<span></span></a><button type="button" aria-label="Dismiss" data-action="dismiss-update">×</button></span><button type="button" class="term" data-action="toggle-terminal" aria-label="Terminal" aria-pressed="false">${iconMarkup('terminal')}</button><div class="status"><i></i><span></span></div>`,
     );
     const terminalButton = pill.shadow.querySelector('.term');
+    const backButton = pill.shadow.querySelector('.back');
     const updateBox = pill.shadow.querySelector('.update');
     const updateLink = updateBox.querySelector('a');
     const updateLabel = updateBox.querySelector('a span');
@@ -468,10 +496,22 @@
     const permission = attach('dsx-composer-button', BUTTON_STYLES, '<button type="button" data-action="permission-menu" aria-haspopup="menu" aria-expanded="false"></button>');
     const model = attach('dsx-composer-button', BUTTON_STYLES, `<button type="button" data-action="model-menu" aria-haspopup="menu" aria-expanded="false"><span class="name"></span><span class="muted effort"></span>${chevron()}</button>`);
 
+    // Beside the workspace: the helpers of this chat. Nothing shows until there is one.
+    const agents = attach(
+      'dsx-agents',
+      BUTTON_STYLES + AGENTS_STYLES,
+      `<button type="button" class="workspace" data-action="agents-menu" aria-haspopup="menu" aria-expanded="false">${iconMarkup('agents')}<span class="label">Agents</span><span class="count"></span><i class="live" hidden></i>${chevron()}</button>`,
+    );
+    agents.host.hidden = true;
+
     // DeepSeek spaces its toggles with their own margins, so the first button brings its own.
     attachment.host.style.marginRight = '8px';
     model.host.style.marginRight = '8px';
-    workspace.host.style.cssText = 'display: flex; align-self: flex-start; margin: 0 0 8px 4px;';
+    // The workspace and the agents share one row above the composer.
+    const workspaceRow = document.createElement('dsx-workspace-row');
+    workspaceRow.style.cssText = 'display: flex; align-items: center; gap: 2px; align-self: flex-start; margin: 0 0 8px 4px;';
+    workspace.host.style.cssText = 'display: flex;';
+    workspaceRow.append(workspace.host, agents.host);
 
     // Shown only while a conversation is open, and then only when it has figures.
     const stats = attach('dsx-stats', STATS_STYLES, '<div class="line"></div>');
@@ -485,6 +525,9 @@
     const pillBox = pill.shadow.querySelector('.status');
     const workspaceButton = workspace.shadow.querySelector('button');
     const workspaceLabel = workspace.shadow.querySelector('.label');
+    const agentsButton = agents.shadow.querySelector('button');
+    const agentsCount = agents.shadow.querySelector('.count');
+    const agentsLive = agents.shadow.querySelector('.live');
     const attachButton = attachment.shadow.querySelector('button');
     const permissionButton = permission.shadow.querySelector('button');
     const modelButton = model.shadow.querySelector('button');
@@ -495,13 +538,18 @@
     let current = { mode: 'ask', cwd: '', workspaces: [], thinking: true };
     // Tokens the open chat has used, and the most it can hold (null while that is not known).
     let contextUsage = { used: 0, limit: null };
+    // The helpers of the open chat, as lib/agent-view.js lists them.
+    let agentList = [];
+    let agentsKey = '';
     // DeepSeek's own attach button and toggles, found in the last mount, and the clicks spent on
     // keeping the toggles in step.
     let nativeAttach = null;
     let nativeToggles = { think: null, search: null };
     const toggleSync = { lastClick: { think: 0, search: 0 }, tries: { think: 0, search: 0 } };
     // What each tooltip says right now. The tooltips read it when they show, and update() fills it in.
-    const tips = { terminal: 'Open the terminal', pill: '', workspace: '', permission: '', attach: 'Attach files', evil: '', update: 'Open the release page. Run the new setup and the extension updates itself.' };
+    const tips = { terminal: 'Open the terminal', pill: '', workspace: '', permission: '', attach: 'Attach files', evil: '', agents: '', back: 'Back to the main chat', update: 'Open the release page. Run the new setup and the extension updates itself.' };
+    tooltip.bind(agentsButton, () => tips.agents);
+    tooltip.bind(backButton, () => tips.back);
     tooltip.bind(evilButton, () => tips.evil);
     tooltip.bind(terminalButton, () => tips.terminal);
     tooltip.bind(pillBox, () => tips.pill);
@@ -519,8 +567,9 @@
     const menus = root.DsxMenus.createMenus({
       icon: iconMarkup,
       tooltip,
-      getState: () => ({ ...current, context: contextUsage }),
+      getState: () => ({ ...current, context: contextUsage, agents: agentList }),
       actions: {
+        openAgent: (id) => onOpenAgent(id),
         selectMode: (next) => {
           if (next === current.mode) return;
           playModeWave(next);
@@ -533,7 +582,7 @@
     });
 
     // Marks which button holds a menu open, for its look and for screen readers.
-    const openers = { workspace: workspaceButton, permission: permissionButton, model: modelButton };
+    const openers = { workspace: workspaceButton, agents: agentsButton, permission: permissionButton, model: modelButton };
     function syncExpanded() {
       for (const [kind, button] of Object.entries(openers)) button.setAttribute('aria-expanded', String(menus.isOpen(kind)));
     }
@@ -578,6 +627,8 @@
     terminalButton.addEventListener('click', trusted(onToggleTerminal));
     updateClose.addEventListener('click', trusted(() => onDismissUpdate(updateTag)));
     workspaceButton.addEventListener('click', trusted(() => openMenu('workspace', workspace.host)));
+    agentsButton.addEventListener('click', trusted(() => openMenu('agents', agents.host)));
+    backButton.addEventListener('click', trusted(() => onBack()));
     permissionButton.addEventListener('click', trusted(() => openMenu('permission', permission.host)));
     modelButton.addEventListener('click', trusted(() => openMenu('model', model.host)));
     attachButton.addEventListener('click', trusted(openFileDialog));
@@ -654,6 +705,32 @@
       });
       stats.host.hidden = !parts.length;
     }
+
+    // `list` is the helpers of the open chat. The button shows only while there are some, with how many,
+    // and a pulsing dot while any is still working. An open menu follows the list.
+    function setAgents(list) {
+      const key = JSON.stringify(list);
+      if (key === agentsKey) return;
+      agentsKey = key;
+      agentList = list;
+      agents.host.hidden = list.length === 0;
+      agentsCount.textContent = String(list.length);
+      agentsLive.hidden = !root.DsxAgentView.isWorking(list);
+      const summary = root.DsxAgentView.summaryText(list);
+      tips.agents = summary;
+      agentsButton.setAttribute('aria-label', summary ? `Agents: ${summary}` : 'Agents');
+      if (!list.length && menus.isOpen('agents')) menus.close('outside');
+      menus.refresh();
+      tooltip.refresh();
+    }
+
+    // The way back to the main chat, in the tab of a helper or a tab opened to look at one.
+    function setBack(visible) {
+      backButton.hidden = !visible;
+    }
+
+    // The times in an open Agents menu keep counting without the list being drawn again.
+    setInterval(() => menus.tick(), 1000);
 
     // The button in the top right row shows whether the side terminal is open.
     function setTerminalOpen(open) {
@@ -733,9 +810,9 @@
         if (nativeAttach && !nativeAttach.hasAttribute('data-dsx-hidden')) nativeAttach.setAttribute('data-dsx-hidden', '');
       }
 
-      // The workspace sits right above the composer's rounded box.
+      // The workspace, and the agents beside it, sit right above the composer's rounded box.
       const box = findComposerBox(group);
-      if (box && box.parentElement && workspace.host.nextElementSibling !== box) box.parentElement.insertBefore(workspace.host, box);
+      if (box && box.parentElement && workspaceRow.nextElementSibling !== box) box.parentElement.insertBefore(workspaceRow, box);
       if (box) {
         // A new chat has no id in its address: the box glows. In a conversation the stats go under it.
         box.toggleAttribute('data-dsx-glow', !SESSION_IN_PATH.test(location.pathname));
@@ -758,7 +835,7 @@
       return true;
     }
 
-    return { update, mount, playModeWave, setContext, setStats, setTerminalOpen, openPermission, openModel, openFileDialog, icon: iconMarkup };
+    return { update, mount, playModeWave, setContext, setStats, setTerminalOpen, setAgents, setBack, openPermission, openModel, openFileDialog, icon: iconMarkup };
   }
 
   root.DsxPageControls = { createPageControls, findComposerBox };

@@ -60,10 +60,24 @@
     .search::placeholder { color: var(--dsw-alias-label-caption, #81858c); }
     .empty { padding: 8px 10px; color: var(--dsw-alias-label-tertiary, #adb2b8); }
     svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .panel.agents { width: 360px; }
+    .item.agent { gap: 10px; }
+    .item.agent .stack { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+    .item.agent .stack .label { flex: none; line-height: 22px; }
+    .item.agent .meta { overflow: hidden; text-overflow: ellipsis; font-size: 12px; line-height: 18px; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-tertiary, #adb2b8); }
+    .item.agent .state { width: 16px; height: 16px; }
+    .item.agent .state.running { color: var(--dsw-alias-brand-text, #679efe); animation: spin 1s linear infinite; }
+    .item.agent .state.ok { color: var(--dsw-alias-state-success-primary, #22c55e); }
+    .item.agent .state.failed, .item.agent .state.timeout { color: var(--dsw-alias-state-error-primary, #f25a5a); }
+    .item.agent .state.queued, .item.agent .state.stopped { color: var(--dsw-alias-label-caption, #81858c); }
+    .item.agent.static { cursor: default; }
+    .item.agent.static:hover { background: none; }
+    .caption { padding: 6px 10px 4px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption, #81858c); }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .tick, .chev { margin-left: auto; }
     .value .chev { margin-left: 0; width: 14px; height: 14px; }
     .tick { width: 15px; height: 15px; }
-    @media (prefers-reduced-motion: reduce) { .item { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { .item { transition: none; } .item.agent .state.running { animation: none; } }
   `;
 
   function basename(path) {
@@ -125,16 +139,19 @@
         node.append(value);
       }
       if (tick) node.append(svgNode('check', 'tick'));
-      if (nav) {
-        node.dataset.nav = '';
-        node.pick = pick;
-        node.addEventListener('mousedown', (event) => event.preventDefault());
-        node.addEventListener('mousemove', () => select(node));
-        node.addEventListener('click', (event) => {
-          if (event.isTrusted) pick();
-        });
-      }
+      if (nav) wireNav(node, pick);
       return node;
+    }
+
+    // Makes a row something the arrow keys and the mouse can pick.
+    function wireNav(node, pick) {
+      node.dataset.nav = '';
+      node.pick = pick;
+      node.addEventListener('mousedown', (event) => event.preventDefault());
+      node.addEventListener('mousemove', () => select(node));
+      node.addEventListener('click', (event) => {
+        if (event.isTrusted) pick();
+      });
     }
 
     function navigable() {
@@ -177,6 +194,58 @@
         el('div', 'sep'),
         item('Add workspace...', { action: 'add-workspace', iconName: 'plus', pick: pickThen(() => actions.addWorkspace()) }),
       );
+    }
+
+    const STATE_ICONS = { running: 'spinner', queued: 'clock', ok: 'check', failed: 'x', timeout: 'x', stopped: 'ban' };
+
+    // How the figures of a helper are written, shared by the first draw and by the ticks.
+    function describe(entry) {
+      const formatTokens = root.DsxFormatTokens ? root.DsxFormatTokens.formatTokens : (value) => String(Math.round(value));
+      const formatDuration = root.DsxChatStats.formatDuration;
+      return root.DsxAgentView.describeAgent(entry, Date.now(), { formatTokens, formatDuration });
+    }
+
+    // One helper: its state, its name, and under it the tokens and the time. A row that has a chat to go to
+    // opens it; one that is still waiting for a place is only shown.
+    function agentRow(entry) {
+      const row = describe(entry);
+      const node = el('div', 'item agent');
+      node.dataset.action = 'agent-open';
+      node.dataset.id = entry.id;
+      node.setAttribute('role', 'menuitem');
+      node.append(svgNode(STATE_ICONS[entry.state] || 'clock', `state ${entry.state}`));
+      const stack = el('div', 'stack');
+      stack.append(el('span', 'label', row.title), el('span', 'meta', row.meta));
+      node.append(stack);
+      if (row.clickable) {
+        node.append(svgNode('chevronRight', 'chev'));
+        wireNav(node, pickThen(() => actions.openAgent(entry.id)));
+      } else {
+        node.classList.add('static');
+      }
+      return node;
+    }
+
+    function renderAgents() {
+      const state = getState();
+      const list = el('div', 'list');
+      list.setAttribute('role', 'menu');
+      list.append(...(state.agents || []).map(agentRow));
+      panel.replaceChildren(list, el('div', 'sep'), el('div', 'caption', 'Up to 2 helpers work at the same time.'));
+    }
+
+    // Keeps the times of the working helpers running, one second at a time, without drawing the list again,
+    // which would throw the scroll and the highlighted row back to the start.
+    function tick() {
+      if (!active || active.kind !== 'agents') return;
+      const entries = new Map((getState().agents || []).map((entry) => [entry.id, entry]));
+      for (const node of panel.querySelectorAll('.item.agent')) {
+        const entry = entries.get(node.dataset.id);
+        if (!entry || (entry.state !== 'running' && entry.state !== 'queued')) continue;
+        const meta = node.querySelector('.meta');
+        const text = describe(entry).meta;
+        if (meta && meta.textContent !== text) meta.textContent = text;
+      }
     }
 
     function permissionRows(list) {
@@ -270,11 +339,17 @@
     function render() {
       if (!active) return;
       tooltip.hide();
+      // A list that is drawn again keeps the place it was scrolled to.
+      const scrolled = panel.querySelector('.list');
+      const scrollTop = scrolled ? scrolled.scrollTop : 0;
       panel.className = `panel ${active.kind}`;
       if (active.kind === 'workspace') renderWorkspace();
+      else if (active.kind === 'agents') renderAgents();
       else if (active.kind === 'permission') renderPermission();
       else renderModel();
       position();
+      const list = panel.querySelector('.list');
+      if (list && active.kind === 'agents') list.scrollTop = scrollTop;
       highlight();
       const search = panel.querySelector('.search');
       if (search) search.focus({ preventScroll: true });
@@ -291,7 +366,7 @@
       const size = panel.getBoundingClientRect();
       let left;
       let top;
-      if (active.kind === 'workspace') {
+      if (active.kind === 'workspace' || active.kind === 'agents') {
         // Under the button, or above it when the page ends before the list does.
         left = anchorRect.left;
         top = anchorRect.bottom + GAP_PX / 2;
@@ -367,6 +442,7 @@
       close,
       isOpen: (kind) => Boolean(active) && (!kind || active.kind === kind),
       refresh: () => { if (active) render(); },
+      tick,
     };
   }
 

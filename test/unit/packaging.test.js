@@ -43,7 +43,7 @@ test('the manifest carries what Firefox needs next to what Chromium needs', () =
   assert.match(manifest.browser_specific_settings.gecko.id, /^[\w.-]+@[\w.-]+$/);
   assert.equal(manifest.background.service_worker, 'background.js');
   // Firefox runs the background as an event page, which has no importScripts: the library comes first.
-  assert.deepEqual(manifest.background.scripts, ['lib/update-check.js', 'lib/agent-pool.js', 'background.js']);
+  assert.deepEqual(manifest.background.scripts, ['lib/update-check.js', 'lib/agent-pool.js', 'lib/agent-registry.js', 'background.js']);
   assert.ok(manifest.permissions.includes('nativeMessaging'));
 });
 

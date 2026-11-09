@@ -3,7 +3,7 @@
 
 // Chromium runs this file as a service worker and loads the library here. Firefox runs it as an event
 // page, where the manifest lists lib/update-check.js before this file, so it is already loaded.
-if (typeof importScripts === 'function') importScripts('lib/update-check.js', 'lib/agent-pool.js');
+if (typeof importScripts === 'function') importScripts('lib/update-check.js', 'lib/agent-pool.js', 'lib/agent-registry.js');
 
 const HOST_NAME = 'com.dsx.shell_host';
 const ALLOWED_ORIGIN = 'https://chat.deepseek.com';
@@ -249,6 +249,10 @@ const MAX_REPORT_CHARS = 200 * 1000;
 const helperTabs = new Map();
 const waitingForOwner = new Map();
 const ownerTimers = new Map();
+// What the Agents menu lists: every helper of a tab, kept after it ends. See lib/agent-registry.js.
+const helperRegistry = DsxAgentRegistry.createAgentRegistry();
+// Tabs opened to look at the chat of a helper that has ended: tab id → { owner }.
+const viewerTabs = new Map();
 
 function tabIdOf(port) {
   return port.sender && port.sender.tab ? port.sender.tab.id : undefined;
@@ -270,6 +274,12 @@ function tellOwner(job, message) {
   waitingForOwner.set(job.owner, [...(waitingForOwner.get(job.owner) || []), message]);
 }
 
+// Sends a tab the current list of its helpers, which the page draws in its Agents menu.
+function pushAgents(owner) {
+  const list = helperRegistry.snapshot(owner);
+  for (const port of portsOfTab(owner)) port.postMessage({ type: 'agents', list });
+}
+
 const helperPool = DsxAgentPool.createAgentPool({
   open: async (job) => {
     const tab = await chrome.tabs.create({ url: `${PAGE_ORIGIN_PREFIX}#dsx-agent=${job.id}`, active: false });
@@ -280,6 +290,8 @@ const helperPool = DsxAgentPool.createAgentPool({
     }
     job.tabId = tab.id;
     helperTabs.set(tab.id, job.id);
+    helperRegistry.update(job.id, { tabId: tab.id });
+    pushAgents(job.owner);
   },
   close: (job) => {
     if (job.tabId === undefined) return null;
@@ -287,15 +299,71 @@ const helperPool = DsxAgentPool.createAgentPool({
     return chrome.tabs.remove(job.tabId);
   },
   onUpdate: (job, state) => {
+    if (state === 'running') helperRegistry.update(job.id, { state: 'running', startedAt: Date.now() });
+    pushAgents(job.owner);
     tellOwner(job, { type: 'agent-update', id: job.toolId, note: state === 'queued' ? 'Waiting: two helpers are already working.' : '' });
   },
   onDone: (job, result) => {
     logDiagnostic('helper-done', result.status);
+    helperRegistry.update(job.id, { state: result.status, endedAt: Date.now(), tabId: null });
+    pushAgents(job.owner);
     tellOwner(job, { type: 'agent-result', id: job.toolId, status: result.status, text: result.text });
   },
 });
 
+// Brings a tab to the front, and its window with it.
+async function focusTab(tabId) {
+  try {
+    const tab = await chrome.tabs.update(tabId, { active: true });
+    if (tab && tab.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true });
+    return true;
+  } catch {
+    // The tab is gone.
+    return false;
+  }
+}
+
+// The Agents menu: a helper that is working is in a tab of its own, which comes to the front. One that has
+// ended has no tab, so its chat is opened in a new one, and that tab gets a way back.
+async function openHelper(port, message) {
+  const owner = tabIdOf(port);
+  const entry = owner === undefined ? null : helperRegistry.findByTool(owner, message.id);
+  if (!entry) return;
+  if (entry.tabId !== null && (await focusTab(entry.tabId))) return;
+  if (!entry.sessionId) return;
+  for (const [tabId, viewer] of viewerTabs) {
+    if (viewer.entry === entry.id && (await focusTab(tabId))) return;
+  }
+  const tab = await chrome.tabs.create({ url: `${PAGE_ORIGIN_PREFIX}a/chat/s/${entry.sessionId}`, active: true });
+  viewerTabs.set(tab.id, { owner, entry: entry.id });
+}
+
+// "Back to the main chat", from the tab of a helper or from a tab opened to look at one.
+async function backToOwner(port) {
+  const tabId = tabIdOf(port);
+  const jobId = helperTabs.get(tabId);
+  const owner = jobId ? (helperRegistry.get(jobId) || {}).owner : (viewerTabs.get(tabId) || {}).owner;
+  if (owner === undefined) return;
+  if (!(await focusTab(owner))) return;
+  // A tab that was only opened to look at a finished helper has done its job. A working helper's tab stays.
+  if (viewerTabs.has(tabId)) chrome.tabs.remove(tabId).catch(() => {});
+}
+
+// What a helper's tab reports about itself: the chat it is in, and the figures DeepSeek gave for it.
+function recordProgress(message) {
+  const entry = helperRegistry.get(message.agentId);
+  if (!entry || entry.state !== 'running') return;
+  const patch = {};
+  if (message.sessionId) patch.sessionId = message.sessionId;
+  if (Number.isFinite(message.output)) patch.output = message.output;
+  if (message.input === null || Number.isFinite(message.input)) patch.input = message.input;
+  if (Number.isFinite(message.steps)) patch.steps = message.steps;
+  helperRegistry.update(entry.id, patch);
+  pushAgents(entry.owner);
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
+  viewerTabs.delete(tabId);
   const jobId = helperTabs.get(tabId);
   if (!jobId) return;
   helperTabs.delete(tabId);
@@ -311,7 +379,12 @@ function startHelper(port, message) {
     return;
   }
   const id = `${owner}-${message.id}`.replace(/[^\w.-]/g, '_');
-  helperPool.submit({ id, toolId: message.id, owner, task, description: String(message.description || '') });
+  const description = String(message.description || '').trim().slice(0, 80);
+  // A call replayed after a reload is already listed; it is started again as a new helper.
+  helperRegistry.remove(id);
+  helperRegistry.add({ id, toolId: message.id, owner, description });
+  helperPool.submit({ id, toolId: message.id, owner, task, description });
+  pushAgents(owner);
 }
 
 function answerHelperHello(port, message) {
@@ -336,6 +409,15 @@ function handleHelperMessage(port, message) {
     case 'agent-hello':
       answerHelperHello(port, message);
       break;
+    case 'agent-progress':
+      recordProgress(message);
+      break;
+    case 'agent-open':
+      openHelper(port, message);
+      break;
+    case 'agent-back':
+      backToOwner(port);
+      break;
     case 'agent-done':
       helperPool.finish(message.agentId, {
         status: message.status === 'ok' ? 'ok' : 'failed',
@@ -356,6 +438,9 @@ function ownerConnected(tabId) {
   const messages = waitingForOwner.get(tabId);
   waitingForOwner.delete(tabId);
   for (const message of messages || []) for (const port of portsOfTab(tabId)) port.postMessage(message);
+  // A page that was reloaded gets its list of helpers back, and a tab opened to look at one learns what it is.
+  pushAgents(tabId);
+  if (viewerTabs.has(tabId)) for (const port of portsOfTab(tabId)) port.postMessage({ type: 'agent-viewer' });
 }
 
 function ownerDisconnected(tabId) {
@@ -366,6 +451,7 @@ function ownerDisconnected(tabId) {
     if (portsOfTab(tabId).length) return;
     waitingForOwner.delete(tabId);
     helperPool.cancelOwnedBy(tabId);
+    helperRegistry.removeOwner(tabId);
   }, OWNER_GRACE_MS));
 }
 

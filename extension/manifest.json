@@ -7,7 +7,7 @@
   "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
   "permissions": ["nativeMessaging", "storage"],
   "host_permissions": ["https://chat.deepseek.com/*"],
-  "background": { "service_worker": "background.js", "scripts": ["lib/update-check.js", "lib/agent-pool.js", "background.js"] },
+  "background": { "service_worker": "background.js", "scripts": ["lib/update-check.js", "lib/agent-pool.js", "lib/agent-registry.js", "background.js"] },
   "browser_specific_settings": {
     "gecko": {
       "id": "deepseek-web-agent@itsdaxi",
@@ -25,7 +25,7 @@
     },
     {
       "matches": ["https://chat.deepseek.com/*"],
-      "js": ["lib/slash-match.js", "lib/format-tokens.js", "lib/chat-stats.js", "lib/terminal-core.js", "cards.js", "menus.js", "page-controls.js", "evil-awakening.js", "evil-greeting.js", "think-collapse.js", "think-tokens.js", "slash-commands.js", "terminal.js", "content.js"],
+      "js": ["lib/slash-match.js", "lib/format-tokens.js", "lib/chat-stats.js", "lib/terminal-core.js", "lib/agent-view.js", "cards.js", "menus.js", "page-controls.js", "evil-awakening.js", "evil-greeting.js", "think-collapse.js", "think-tokens.js", "slash-commands.js", "terminal.js", "content.js"],
       "css": ["page.css", "logos.css", "evil.css"],
       "run_at": "document_start"
     }

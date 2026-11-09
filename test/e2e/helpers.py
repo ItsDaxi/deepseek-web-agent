@@ -52,6 +52,13 @@ def refusal(reason, message_id):
     return "\n".join(lines)
 
 
+def with_usage(body, total):
+    """DeepSeek ends a reply with the token total of the whole chat; the extension shows input as that minus the output."""
+    status = "data: " + json.dumps({"p": "response/status", "o": "SET", "v": "FINISHED"})
+    usage = "data: " + json.dumps({"p": "response", "o": "BATCH", "v": [{"p": "accumulated_token_usage", "v": total}, {"p": "quasi_status", "v": "FINISHED"}]})
+    return body.replace(status, usage + "\n\n" + status)
+
+
 class HelperServer(harness.MockServer):
     def __init__(self):
         super().__init__()
@@ -113,7 +120,7 @@ class HelperServer(harness.MockServer):
                 return
             messages.append({"message_id": user_id, "role": "USER", "fragments": [{"type": "REQUEST", "content": body["prompt"]}]})
             messages.append({"message_id": reply_id, "role": "ASSISTANT", "fragments": [{"type": "THINK", "content": "Thinking."}, {"type": "RESPONSE", "content": answer}]})
-            route.fulfill(status=200, headers={"content-type": "text/event-stream; charset=utf-8"}, body=harness.sse(reply_id, answer))
+            route.fulfill(status=200, headers={"content-type": "text/event-stream; charset=utf-8"}, body=with_usage(harness.sse(reply_id, answer), 1500))
         elif path == "/api/v0/chat/history_messages":
             session = re.search(r"chat_session_id=([^&]+)", request.url).group(1)
             payload = {"data": {"biz_code": 0, "biz_data": {"chat_session": {"id": session}, "chat_messages": self.sessions.get(session, []), "cache_control": "REPLACE"}}}
@@ -146,8 +153,20 @@ def run(context, server):
     most_at_once = [0]
     waited = [False]
 
+    shot = Path(sys.argv[1]) if len(sys.argv) > 1 else None
+    taken = [False]
+
     def watch():
         most_at_once[0] = max(most_at_once[0], len(helper_pages(context, page)))
+        # For a look at the menu while helpers work, only when a folder for screenshots is given.
+        if shot and not taken[0] and shadow.actions("agents-menu"):
+            taken[0] = True
+            harness.pause(4)
+            page.screenshot(path=str(shot / "agents-button-working.png"))
+            shadow.click_last("agents-menu")
+            harness.pause(1.2)
+            page.screenshot(path=str(shot / "agents-menu-working.png"))
+            page.keyboard.press("Escape")
         if "Waiting: two helpers are already working." in shadow.card_text():
             waited[0] = True
         return "All helpers reported." in harness.visible_text(page)
@@ -170,6 +189,41 @@ def run(context, server):
     check("all the helper tabs were closed", wait_until(lambda: not helper_pages(context, page), timeout=10, message="tabs closed"), str([p.url for p in helper_pages(context, page)]))
     check("a helper's chat never carried the helper tool", all("dsx:agent" not in body["prompt"] for body in server.requests if body["chat_session_id"] != SESSION_ID))
     check("a helper's first message carries the task and the report request", any("plain-text report" in body["prompt"] and "HELPER-TASK-1" in body["prompt"] for body in server.requests))
+    look_at_agents(context, page, shadow, wait_until)
+
+
+def look_at_agents(context, page, shadow, wait_until):
+    shot = Path(sys.argv[1]) if len(sys.argv) > 1 else None
+    page.bring_to_front()
+    check("the Agents button appears with the number of helpers", wait_until(lambda: "Agents" in shadow.text() and shadow.actions("agents-menu"), message="agents button"))
+    if shot:
+        page.screenshot(path=str(shot / "agents-button.png"))
+    shadow.click_last("agents-menu")
+    check("the Agents menu lists the three helpers", wait_until(lambda: len(shadow.actions("agent-open")) == 3, message="three rows"), str(len(shadow.actions("agent-open"))))
+    text = shadow.text()
+    check("each row names its helper", all(f"Task {n}" in text for n in "123"))
+    check("each row shows input and output tokens and a time", "Input" in text and "Output" in text and " tok" in text and re.search(r"\d+(\.\d)?s", text) is not None, text[-400:])
+    check("the menu says how many helpers work at once", "Up to 2 helpers work at the same time." in text)
+    if shot:
+        page.screenshot(path=str(shot / "agents-menu.png"))
+
+    before = len(context.pages)
+    shadow.click_last("agent-open")
+    check("a finished helper opens its chat in a new tab", wait_until(lambda: len(context.pages) > before, message="viewer tab"))
+    viewer = next((p for p in context.pages if p != page and "/a/chat/s/" in p.url), None)
+    check("the new tab is the helper's chat", viewer is not None and "chat.deepseek.com/a/chat/s/" in viewer.url, str([p.url for p in context.pages]))
+    if viewer is None:
+        return
+    harness.active_page[0] = viewer
+    seen = harness.Shadow(viewer, context)
+    check("that tab has a way back to the main chat", wait_until(lambda: "Main chat" in seen.text() and seen.actions("agents-back"), message="back button"))
+    if shot:
+        viewer.screenshot(path=str(shot / "agents-viewer.png"))
+    seen.click_last("agents-back")
+    # The waits run on the main chat's page, which stays open while the viewer closes.
+    harness.active_page[0] = page
+    check("Back returns to the main chat and closes the tab that was only a viewer", wait_until(lambda: viewer.is_closed(), message="viewer closed"))
+    check("the main chat is still there, with its Agents button", "Agents" in shadow.text() and bool(shadow.actions("agents-menu")))
 
 
 def main():
