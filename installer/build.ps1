@@ -91,6 +91,11 @@ foreach ($file in 'host.js', 'tools.js', 'instructions.js', 'pick-folder.ps1') {
 $evilText = Join-Path $root 'evil.txt'
 if (-not (Test-Path $evilText)) { throw "evil.txt is missing from $root, so the setup would ship without it." }
 Copy-Item $evilText (Join-Path $work 'payload\evil.txt')
+# The hashes of every evil.txt the project ever committed, so an update can tell an evil.txt the user
+# never edited (replaced with the new one) from one they wrote themselves (left alone).
+$evilHashes = (& $NodeExe (Join-Path $PSScriptRoot 'evil-history.js')) -join "`n"
+if ($LASTEXITCODE -ne 0 -or -not $evilHashes) { throw 'The history of evil.txt could not be read from git.' }
+[IO.File]::WriteAllText((Join-Path $work 'payload\evil-previous.txt'), $evilHashes + "`n")
 Copy-Item $NodeExe (Join-Path $work 'payload\runtime\node.exe')
 $nodeLicense = Join-Path (Split-Path $NodeExe) 'LICENSE'
 if (Test-Path $nodeLicense) { Copy-Item $nodeLicense (Join-Path $work 'payload\runtime\LICENSE') }
