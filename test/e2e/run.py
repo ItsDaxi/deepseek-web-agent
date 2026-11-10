@@ -6,6 +6,7 @@ Usage: python -I test/e2e/run.py [screenshot_dir]
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -677,8 +678,7 @@ def run(context, server):
     run_command("/status")
     check("/status lists the instruction files", wait_until(lambda: "Instruction files" in shadow.text() and "AGENTS.md" in shadow.text(), message="status files"), shadow.text()[-300:])
     worker.evaluate("() => chrome.storage.local.set({ cwd: '' })")
-    (USER_DIR / "CLAUDE.md").unlink()
-    USER_DIR.rmdir()
+    shutil.rmtree(USER_DIR, ignore_errors=True)
     (project / "AGENTS.md").unlink()
     project.rmdir()
     pause(1)
@@ -701,8 +701,7 @@ def run(context, server):
     shadow.click_last("run")
     check("the call runs and its card is titled with the server and the tool", wait_until(lambda: "Call this MCP tool?" not in shadow.card_text() and "MCP fake: echo" in shadow.card_text(), message="mcp ran"), shadow.card_text())
     check("the result goes back to the model with the name of the call", wait_until(lambda: len(server.requests) > count and 'tool="mcp"' in server.requests[-1]["prompt"] and "echo: dsx-e2e-mcp" in server.requests[-1]["prompt"] and 'command="fake.echo"' in server.requests[-1]["prompt"], message="mcp result sent"))
-    (USER_DIR / "mcp.json").unlink()
-    USER_DIR.rmdir()
+    shutil.rmtree(USER_DIR, ignore_errors=True)
     # A change of workspace makes the host read the config again, and the tools are gone.
     worker.evaluate("(cwd) => chrome.storage.local.set({ cwd })", str(WORKDIR))
     pause(1.5)

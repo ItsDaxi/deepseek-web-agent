@@ -10,7 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { readInstructions } = require('./instructions.js');
-const { readMcpConfig, configPaths } = require('./mcp-config.js');
+const { readMcpConfig, configPaths, ensureOwnMcpFile } = require('./mcp-config.js');
 const { createMcpManager } = require('./mcp.js');
 
 const VERSION = '0.1.0';
@@ -485,6 +485,7 @@ function sendMcpSnapshot() {
 // message: a server that takes long to start must not hold back the ones that are ready.
 function listMcpServers({ id, cwd }) {
   const folder = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
+  ensureOwnMcpFile(configPaths({ userDir: USER_DIR }));
   const config = readMcpConfig({ cwd: folder, userDir: USER_DIR });
   mcpList = { id, files: config.files, errors: config.errors };
   mcp.configure({ servers: config.servers, cwd: folder }).then(sendMcpSnapshot);

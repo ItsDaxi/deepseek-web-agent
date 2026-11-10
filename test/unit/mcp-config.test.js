@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { readMcpConfig, fromClaude, fromCodex, expandVariables } = require('../../host/mcp-config.js');
+const { readMcpConfig, configPaths, ensureOwnMcpFile, fromClaude, fromCodex, expandVariables } = require('../../host/mcp-config.js');
 
 function makeHome(files) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsx-mcp-config-'));
@@ -135,4 +135,21 @@ test('entries that cannot run say why', () => {
   assert.match(fromClaude('a', { type: 'websocket' }, 'claude').error, /not supported/);
   assert.match(fromCodex('a', {}).error, /neither a command nor a url/);
   assert.equal(fromClaude('a', { url: 'https://x/mcp' }, 'claude').transport, 'http');
+});
+
+test('an empty ~/.dsx/mcp.json is created when there is none, and an existing one is never touched', () => {
+  const home = makeHome({});
+  const paths = configPaths({ home, userDir: path.join(home, '.dsx'), env: {} });
+  assert.equal(fs.existsSync(paths.userDir), false);
+  assert.equal(ensureOwnMcpFile(paths), true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(paths.mcp, 'utf8')), { mcpServers: {} });
+  assert.deepEqual(read(home).servers, [], 'the empty file adds no server');
+  fs.writeFileSync(paths.mcp, '{"mcpServers":{"mine":{"command":"x"}}}');
+  assert.equal(ensureOwnMcpFile(paths), false);
+  assert.deepEqual(read(home).servers.map((server) => server.name), ['mine']);
+});
+
+test('a folder that cannot be created is not an error', () => {
+  const home = makeHome({ blocker: 'a file where the folder should go' });
+  assert.equal(ensureOwnMcpFile(configPaths({ home, userDir: path.join(home, 'blocker', '.dsx'), env: {} })), false);
 });

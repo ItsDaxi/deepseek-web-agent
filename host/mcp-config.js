@@ -129,6 +129,20 @@ function configPaths({ home = os.homedir(), userDir = path.join(home, '.dsx'), e
   };
 }
 
+// Makes sure ~/.dsx/mcp.json exists, empty, so there is a place for the user (or the model, when asked) to add a
+// server. A file that is already there is never touched. Returns true when it was created.
+function ensureOwnMcpFile(paths) {
+  try {
+    if (fs.existsSync(paths.mcp)) return false;
+    fs.mkdirSync(paths.userDir, { recursive: true });
+    fs.writeFileSync(paths.mcp, `${JSON.stringify({ mcpServers: {} }, null, 2)}
+`, { encoding: 'utf8', flag: 'wx' });
+    return true;
+  } catch {
+    return false; // A folder that cannot be written is not a reason to stop listing the servers.
+  }
+}
+
 // The places to look in, each with how to read it. `cwd` picks the folder entry of ~/.claude.json.
 function readSources({ home, cwd, userDir, env }) {
   const { claude: claudeFile, codex: codexFile, mcp: ownFile } = configPaths({ home, userDir, env });
@@ -195,4 +209,4 @@ function readMcpConfig({ cwd, home = os.homedir(), userDir = path.join(home, '.d
   return { servers, errors, files };
 }
 
-module.exports = { readMcpConfig, configPaths, fromClaude, fromCodex, expandVariables, DEFAULT_STARTUP_TIMEOUT_MS, DEFAULT_TOOL_TIMEOUT_MS };
+module.exports = { readMcpConfig, configPaths, ensureOwnMcpFile, fromClaude, fromCodex, expandVariables, DEFAULT_STARTUP_TIMEOUT_MS, DEFAULT_TOOL_TIMEOUT_MS };

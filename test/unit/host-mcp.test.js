@@ -165,6 +165,8 @@ test('with no config the answer is an empty list, and a broken file is named', a
   empty.send({ type: 'mcp-list', id: 'none', cwd: empty.home });
   await empty.waitFor((m) => m.type === 'mcp-servers' && m.done === true);
   assert.deepEqual(lastSnapshot(empty, 'none').servers, []);
+  // The first listing leaves an empty mcp.json, a place to add a server.
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(empty.home, '.dsx', 'mcp.json'), 'utf8')), { mcpServers: {} });
   empty.stop();
 
   const broken = startHost({ '.codex/config.toml': 'this is = = not toml' });

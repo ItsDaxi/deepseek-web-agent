@@ -120,7 +120,7 @@ While `/evil` is on the page wears the red look: the blue of DeepSeek becomes re
 
 The extension reads `AGENTS.md` and `CLAUDE.md`, the files other coding agents use for standing instructions, and gives them to the model in the hidden prompt.
 
-- **For every folder.** Put them in `.dsx` in your home folder, for example `C:\Users\you\.dsx\AGENTS.md`. The folder is yours: the extension never writes in it, and an update never touches it.
+- **For every folder.** Put them in `.dsx` in your home folder, for example `C:\Users\you\.dsx\AGENTS.md`. The folder is yours: the only thing the host ever writes there is an empty `mcp.json`, when there is none (see MCP servers), and an update never touches anything in it.
 - **For one folder.** Put them in the workspace you picked, or in any folder above it up to your home folder. A project can have its own, and a folder further up can have one for all its projects.
 
 The user's files come first, then the folders from the outermost to the working folder. When two of them disagree, the one listed last wins, so the file closest to your work has the final word. In each folder `AGENTS.md` comes before `CLAUDE.md`. Only these two names are read, only in those places, and nothing else on the disk. The files of other tools, such as `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`, are not read: copy or link the text into `.dsx` if you want it here. Their MCP server lists are the exception: see MCP servers.
@@ -159,7 +159,7 @@ The host reads these places and nothing else:
 
 | File | What is read |
 | --- | --- |
-| `~/.dsx/mcp.json` | `{ "mcpServers": { ... } }`, the same format as Claude Code's `.mcp.json`. Use it for a server only this tool should have. |
+| `~/.dsx/mcp.json` | `{ "mcpServers": { ... } }`, the same format as Claude Code's `.mcp.json`. Use it for a server only this tool should have. The host creates it, empty, the first time it lists the servers, and never changes it after that. |
 | `~/.claude.json` | The user servers (`mcpServers`) and the servers of the workspace you picked (`projects`), minus the ones turned off for it. `CLAUDE_CONFIG_DIR` moves it. |
 | `~/.codex/config.toml` | The `[mcp_servers.*]` tables, with `startup_timeout_sec`, `tool_timeout_sec`, `enabled`, `enabled_tools`, `disabled_tools`, `cwd`, `bearer_token_env_var`, `http_headers` and `env_http_headers`. `CODEX_HOME` moves it. |
 
