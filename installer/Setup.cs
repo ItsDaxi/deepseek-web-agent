@@ -155,11 +155,6 @@ namespace DsxSetup
                     if (string.IsNullOrEmpty(entry.Name)) continue;
                     string target = Path.GetFullPath(Path.Combine(AppDir, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
                     if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
-                    // The list of earlier evil.txt hashes is only read here, never installed.
-                    if (entry.FullName == "evil-previous.txt") continue;
-                    // evil.txt is the user's to edit, so an update replaces the one that is there only when the
-                    // user never touched it, meaning it is identical to a version that was shipped before.
-                    if (entry.FullName == "evil.txt" && File.Exists(target) && !IsUnedited(archive, target)) continue;
                     Directory.CreateDirectory(Path.GetDirectoryName(target));
                     using (Stream source = entry.Open())
                     using (FileStream output = File.Create(target))
@@ -169,38 +164,6 @@ namespace DsxSetup
                     done += entry.Length;
                     progress(total == 0 ? 100 : (int)(done * 100 / total));
                 }
-            }
-        }
-
-        // True when the installed evil.txt is a copy of one that shipped before. The hashes are of the text with
-        // no byte order mark and plain line endings, the same as installer/evil-history.js writes them.
-        static bool IsUnedited(ZipArchive archive, string installed)
-        {
-            try
-            {
-                ZipArchiveEntry list = archive.GetEntry("evil-previous.txt");
-                if (list == null) return false;
-                string known;
-                using (StreamReader reader = new StreamReader(list.Open())) known = reader.ReadToEnd();
-
-                byte[] bytes = File.ReadAllBytes(installed);
-                int start = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF ? 3 : 0;
-                List<byte> text = new List<byte>(bytes.Length);
-                for (int i = start; i < bytes.Length; i++)
-                {
-                    if (bytes[i] == 0x0D && i + 1 < bytes.Length && bytes[i + 1] == 0x0A) continue;
-                    text.Add(bytes[i]);
-                }
-                string hash;
-                using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
-                    hash = BitConverter.ToString(sha.ComputeHash(text.ToArray())).Replace("-", "").ToLowerInvariant();
-
-                return known.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Any(line => line.Trim() == hash);
-            }
-            catch (Exception)
-            {
-                // Anything unreadable counts as the user's own file, which is never overwritten.
-                return false;
             }
         }
 

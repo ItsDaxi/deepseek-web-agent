@@ -22,10 +22,6 @@ A tool call shows up as a card between the thinking block and the answer. The th
 
 ![A write call shown as a card, with the model's answer below it](docs/tool-call.png)
 
-Evil Mode, turned on with `/evil`, gives the page a red look and adds your own instructions from `evil.txt` to the hidden prompt.
-
-![The same page in Evil Mode](docs/evil-mode.png)
-
 ## Install on Windows
 
 Download `dsx-<version>-setup.exe` from the [latest release](https://github.com/ItsDaxi/deepseek-web-agent/releases/latest) and run it. It needs no admin rights and no Node.js, and installs into your user folder. You can remove it from Installed apps in Windows Settings.
@@ -75,13 +71,13 @@ All controls sit in the composer of the DeepSeek page. The extension has no tool
 
 - **Default workspace**, above the composer, is the working directory. Its menu lists the folders you used before; "Add workspace..." opens your system's folder dialog.
 - The paperclip opens DeepSeek's own file dialog.
-- The permission button (**Read Only**, **Workspace Write**, **Full access**) opens a menu of presets. A short pixel wave crosses the composer when you change it: white, or red and flickering while Evil Mode is on, whatever the preset.
+- The permission button (**Read Only**, **Workspace Write**, **Full access**) opens a menu of presets. A short pixel wave crosses the composer when you change it.
 - The model button opens a small panel. The model is fixed. **Effort** is on or off and works exactly like DeepSeek's DeepThink button, which the extension hides and drives for you. Search is always on, and its button is hidden too. "Enable agent teamwork" is not built yet and cannot be clicked.
 - "Thought for N seconds" blocks are kept collapsed. Click one to read it, and it stays open. To stop this, run `chrome.storage.local.set({ collapseThinking: false })` in the extension's service worker console.
 - The model panel (click the model name above the send button) has a Context row: the tokens the chat has used against the model's 1M-token window, like `212K / 1M`, with a thin bar that turns amber and then red as it fills. It updates at the end of every reply, with the total DeepSeek counts.
 - Each thinking block shows how many tokens the model spent reasoning, counted live as it streams (`1.2K tokens`). DeepSeek sends the reasoning one token per chunk, so the count is exact; blocks from an earlier visit show none.
 - In a conversation, a line under the composer sums up the chat: turns and steps, the time the model spent (`LLM`), the average wait for the first token and the speed (`TTFT avg`, `tok/s`), and the tokens in and out. A turn is a message you wrote and a step is one reply of the model, so a command that goes back to the model adds a step. Input is what DeepSeek counts for the chat minus what the model wrote. A chat the tab did not follow from its first message, such as one opened from the history, shows only what happened since, and no input. The figures are kept while the tab lives, so a reload does not lose them. DeepSeek does not report cache hits to the page, so there is no such figure.
-- On a new chat, before there is a conversation, the composer glows softly. In Evil Mode the glow turns red with the rest.
+- On a new chat, before there is a conversation, the composer glows softly.
 
 The model chooses the timeout of each command, up to 600 seconds.
 
@@ -102,19 +98,10 @@ A message that only starts with a slash, such as `/etc/hosts what is this file`,
 | `/status` | Shows the extension version, the shell host, the permissions, the workspace, the instruction files found, the MCP servers and their tools, the effort and the thinking setting. |
 | `/thinking collapse` or `/thinking default` | Keeps the thinking blocks collapsed, or leaves them as DeepSeek shows them. |
 | `/terminal` | Opens or closes the side terminal. See below. |
-| `/evil` | Turns your own instructions for the model, read from `evil.txt`, on or off in the hidden prompt. See below. |
 | `/update` | Asks GitHub for the latest release now, and shows the update pill again if it was closed. It works even when the automatic check is off, because you are asking for it. |
 | `/help` | Lists the commands. |
 
 A command answers in a small panel above the composer, which closes by itself or when you click it.
-
-#### Your own instructions
-
-`/evil` adds a text of your own to the hidden prompt, next to the one the extension already sends. The text is in a file called `evil.txt`, in the install folder beside `host` and `extension`, and it ships with the project: the Windows setup puts it in `%LOCALAPPDATA%\DeepSeekShellTool\`, and from source it is the root of the project. Edit it to make it your own: a setup update replaces it with the new shipped text only while it is still identical to a version that shipped before, so once you change it your changes stay. An `evil.txt` in your `.dsx` folder takes the place of that one, and no update can touch it. If the file is missing, `/evil` tells you the exact path where to create it.
-
-`/evil` takes no arguments: it switches. The square flame button next to "New chat" in the sidebar does the same, and turns red while it is on. The first time it reads the file and turns the feature on, and the next time it turns it off. The text goes out with your next message in each chat, once, and again only if it changes. It sits in a hidden block, so it never shows in the chat, and `/evil` never prints it back, only its size. The file is read again every time the page loads, so after editing it reload the page. Turning it off tells a chat that already has the text to ignore it. The file has no size limit of its own: a long text travels from the host to the extension in pieces and is joined again. DeepSeek has a limit on the length of a message that this extension cannot see, so above 100,000 characters `/evil` warns you that DeepSeek may refuse it. Only that one file is read, and the text is never taken from the web.
-
-While `/evil` is on the page wears the red look: the blue of DeepSeek becomes red, and the logo in the sidebar and the whale on an empty chat are replaced by your own (`extension/logos.css` and `extension/evil.css`). Turning `/evil` on plays a short transition (`extension/evil-awakening.js`, one second): a flickering full-screen glitch of pixel blocks in purple, magenta, blue and black covers the page, the red theme switches on underneath, then the glitch breaks up while the new logos fade in. While it is on, the greeting on an empty chat is one of five tougher lines (`extension/evil-greeting.js`) instead of DeepSeek's own. Turning it off brings the original look and greeting back at once.
 
 ### Instruction files
 
@@ -240,8 +227,6 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/page-hook.js` | Wraps `XMLHttpRequest` and sends results through the page's own composer |
 | `extension/content.js` | Approval decisions, the life of each command, and changes to the page |
 | `extension/cards.js` | Draws the tool cards |
-| `extension/evil-awakening.js` | The animation played when `/evil` is turned on |
-| `extension/evil-greeting.js` | The tougher greetings on an empty chat while `/evil` is on |
 | `extension/terminal.js` | The side terminal panel |
 | `extension/lib/terminal-core.js` | What a lone `cd` means, the prompt and the history of the side terminal |
 | `extension/page-controls.js` | The status pill, the composer buttons, tooltips and the mode animation |

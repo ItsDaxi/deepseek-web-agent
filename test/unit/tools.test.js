@@ -158,9 +158,9 @@ test('the host runs file tools like commands', async () => {
 
 test('a regular expression that never finishes can be timed out', async () => {
   const cwd = workspace();
-  fs.writeFileSync(path.join(cwd, 'evil.txt'), `${'a'.repeat(40)}!`);
+  fs.writeFileSync(path.join(cwd, 'input.txt'), `${'a'.repeat(40)}!`);
   const host = startHost();
-  host.send({ type: 'exec', id: 'slow', tool: 'grep', cwd, body: '(a+)+$', path: 'evil.txt', timeoutMs: 700 });
+  host.send({ type: 'exec', id: 'slow', tool: 'grep', cwd, body: '(a+)+$', path: 'input.txt', timeoutMs: 700 });
   assert.equal((await host.exitOf('slow')).status, 'timeout');
   host.stop();
 });

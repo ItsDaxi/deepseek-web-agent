@@ -25,18 +25,6 @@ textarea[data-dsx-sending] {
   caret-color: transparent !important;
 }
 
-/* The sidebar row of "New chat" shares its line with the Evil Mode button: the button keeps the rest. */
-[data-dsx-row] {
-  display: flex !important;
-  align-items: stretch;
-  gap: 8px;
-}
-
-[data-dsx-row] > :first-child {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
 /* The side terminal docks on the right and the whole app shrinks to make room for it: terminal.js sets the
    width. The app's root is pinned to the space that is left. The transform makes it the containing block of
    everything fixed inside it (the composer, the sidebar), so those shrink with it instead of staying under
@@ -62,7 +50,7 @@ html[data-dsx-terminal] body:not(:has(> #root)) {
 
 /* The composer glows softly on a new chat, before there is a conversation. page-controls.js marks the box.
    A drop-shadow filter follows the box's shape and leaves its own shadows and focus ring alone. The colour
-   is a soft white with a touch of the page's brand colour, so Evil Mode tints it red with the rest. */
+   is a soft white with a touch of the page's brand colour. */
 [data-dsx-glow] {
   filter:
     drop-shadow(0 0 20px color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 9%, transparent))
@@ -78,10 +66,4 @@ html[data-dsx-terminal] body:not(:has(> #root)) {
    them, so they stay in the page (and keep working) but are not drawn. */
 [data-dsx-hidden] {
   display: none !important;
-}
-
-/* The shortcut hint DeepSeek draws inside "New chat" would sit on top of its label next to the Evil Mode
-   button. page-controls.js marks the button. */
-[data-dsx-newchat]::after {
-  content: none !important;
 }

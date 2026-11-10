@@ -18,15 +18,12 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 EXTENSION = ROOT / "extension"
 MOCK_PAGE = (Path(__file__).parent / "mock-deepseek.html").read_text(encoding="utf-8")
-# Where the host looks for the user's own instructions (/evil) during this run.
-PROMPT_FILE = Path(tempfile.gettempdir()) / f"dsx-e2e-evil-{os.getpid()}.txt"
 # The user folder of the host (~/.dsx in real life), empty until a test puts instruction files in it.
 USER_DIR = Path(tempfile.gettempdir()) / f"dsx-e2e-user-{os.getpid()}"
 # Where the host would look for the MCP setups of Claude Code and Codex. Empty, so a run never starts the real
 # servers of whoever runs it. The MCP test puts a config in USER_DIR instead.
 MCP_HOME = Path(tempfile.gettempdir()) / f"dsx-e2e-mcp-home-{os.getpid()}"
 HOST_ENV = {
-    "DSX_PROMPT_FILE": str(PROMPT_FILE),
     "DSX_USER_DIR": str(USER_DIR),
     "CLAUDE_CONFIG_DIR": str(MCP_HOME),
     "CODEX_HOME": str(MCP_HOME / ".codex"),
@@ -408,7 +405,6 @@ def run(context, server):
     check("composer order is folder, native toggles, permission", order == ["DSX-COMPOSER-BUTTON:", "DIV:DeepThink", "DIV:Search", "DSX-COMPOSER-BUTTON:"], str(order))
     check("the permission button starts on Read Only", "Read Only" in shadow.text() and "Full access" not in shadow.text())
     check("the composer shows the workspace and the fixed model", "Default workspace" in shadow.text() and "DeepSeek-V4.1-Flash" in shadow.text())
-    check("the shortcut hint of New chat is switched off", page.evaluate("getComputedStyle(document.getElementById('new-chat'), '::after').content") == "none")
     check("DeepThink and Search are hidden", page.evaluate("[...document.querySelectorAll('.ds-toggle-button')].every((toggle) => getComputedStyle(toggle).display === 'none')"))
     check("both are on by default", page.evaluate("[...document.querySelectorAll('.ds-toggle-button')].every((toggle) => toggle.classList.contains('ds-toggle-button--selected'))"))
     check("the pill only reports the connection", "Shell · Connected" in shadow.text() and "Shell · Read Only" not in shadow.text())
@@ -597,7 +593,6 @@ def run(context, server):
     page.fill("#composer", "")
     page.keyboard.press("Tab")
     check("Tab alone never moves the focus out of the composer", page.evaluate("document.activeElement.id") == "composer")
-    # /evil adds the user's own instructions, read from a file, to the hidden prompt.
     def run_command(text):
         page.fill("#composer", text)
         page.press("#composer", "Enter")
@@ -616,48 +611,16 @@ def run(context, server):
         wait_until(lambda: "Shell · Connected" in shadow.text(), message="connected after reload")
         pause(1)
 
-    PROMPT_FILE.unlink(missing_ok=True)
-    run_command("/evil")
-    check("/evil refuses a missing file and names it", wait_until(lambda: stored("evilOn") in (False, None) and "There is no evil.txt yet" in shadow.text(), message="on without file"))
-    PROMPT_FILE.write_text("Always answer in rhyme.", encoding="utf-8")
-    run_command("/evil")
-    check("/evil reads the file and turns it on without a message", wait_until(lambda: stored("evilOn") is True, message="evil on") and "evil.txt" not in shadow.text())
-    check("it never prints the text back", "Always answer in rhyme." not in shadow.text())
-    # With Evil Mode on, a change of preset plays the red flickering wave instead of the white one.
-    wait_until(lambda: not page.evaluate("!!document.querySelector('dsx-awakening')"), timeout=5, message="awakening done")
+    # A change of preset plays a short wave across the composer.
     shadow.click_last("permission-menu")
-    wait_until(lambda: shadow.actions("mode-workspace"), message="permission menu in evil mode")
+    wait_until(lambda: shadow.actions("mode-workspace"), message="permission menu")
     shadow.click_last("mode-workspace")
-    check("a preset change in Evil Mode plays the red flickering wave", wait_until(lambda: page.evaluate("!!document.querySelector('dsx-wave')"), timeout=3, message="red wave"))
-    if SCREENSHOTS:
-        for index in range(3):
-            pause(0.2)
-            page.screenshot(path=str(SCREENSHOTS / f"evil-glitch-wave-{index}.png"), clip={"x": 150, "y": 740, "width": 800, "height": 150})
-    wait_until(lambda: not page.evaluate("!!document.querySelector('dsx-wave')"), timeout=3, message="red wave done")
+    check("a preset change plays the wave", wait_until(lambda: page.evaluate("!!document.querySelector('dsx-wave')"), timeout=3, message="wave"))
+    wait_until(lambda: not page.evaluate("!!document.querySelector('dsx-wave')"), timeout=3, message="wave done")
     shadow.click_last("permission-menu")
-    wait_until(lambda: shadow.actions("mode-ask"), message="permission menu again in evil mode")
+    wait_until(lambda: shadow.actions("mode-ask"), message="permission menu again")
     shadow.click_last("mode-ask")
     wait_until(lambda: stored("mode") == "ask", message="back to read only")
-    first = send_and_wait("hello there")
-    check("the instructions go with the next message", "Additional instructions from the user" in first and "Always answer in rhyme." in first)
-    check("they are in a hidden block", "<dsx:system>Additional instructions" in first)
-    check("they never show in the chat", "Always answer in rhyme." not in visible_text(page))
-    check("they are sent once, not with every message", "Always answer in rhyme." not in send_and_wait("and again"))
-    PROMPT_FILE.write_text("Be very short.", encoding="utf-8")
-    reload_page()
-    check("reloading the page reads the file again", "Be very short." in send_and_wait("third message"))
-    # No limit: a text of hundreds of thousands of characters crosses the whole chain unchanged.
-    huge = ("Pensa in grande. " * 20000).strip()
-    PROMPT_FILE.write_text(huge, encoding="utf-8")
-    reload_page()
-    check("a very long file is read whole and sent whole", huge in send_and_wait("a long one"))
-    run_command("/evil")
-    check("/evil again turns it off", wait_until(lambda: stored("evilOn") is False, message="evil off"))
-    check("turning it off plays the animation too", wait_until(lambda: page.evaluate("!!document.querySelector('dsx-awakening')"), timeout=3, message="awakening on exit"))
-    check("the original look is back once it ends", wait_until(lambda: page.evaluate("!document.querySelector('dsx-awakening') && !document.documentElement.hasAttribute('data-dsx-evil')"), timeout=5, message="original look"))
-    check("the chat is told to forget them", "no longer apply" in send_and_wait("fourth message"))
-    check("and only once", "no longer apply" not in send_and_wait("fifth message"))
-    PROMPT_FILE.unlink(missing_ok=True)
 
     # Instruction files: CLAUDE.md in the user's own folder, then an AGENTS.md in the workspace.
     check("no instruction files, nothing added", "Additional instructions" not in send_and_wait("before any file"))
@@ -914,7 +877,7 @@ def main():
                 profile,
                 viewport={"width": 1100, "height": 900},
                 args=[f"--disable-extensions-except={EXTENSION}", f"--load-extension={EXTENSION}", "--no-first-run"],
-                # The host inherits this, so /evil reads a file of the test and never a real one.
+                # The host inherits this, so it reads the folders of the test and never the real ones.
                 env={**os.environ, **HOST_ENV},
                 **target,
             )

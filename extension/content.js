@@ -16,8 +16,7 @@
   // workspaces are the folders the user chose before, listed in the workspace menu; cwd is the current one.
   // thinking is the Effort switch, which drives DeepSeek's DeepThink. Search is always on.
   // dismissedUpdate is the release tag whose notice the user closed.
-  // evilOn: the user's own instructions, read from evil.txt, are added to the hidden prompt.
-  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', evilOn: false, terminalOpen: false, terminalWidth: 440, helperRetryMs: 0 };
+  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', terminalOpen: false, terminalWidth: 440, helperRetryMs: 0 };
   const MAX_WORKSPACES = 8;
   // Used only when the model leaves out the timeout it is asked to choose.
   const FALLBACK_TIMEOUT_SECONDS = 120;
@@ -155,53 +154,17 @@
     postToPage({ type: 'config', env, thinking: settings.thinking !== false, agent: Boolean(helper) });
   }
 
-  // The user's own instructions, read from evil.txt by the host. Null until they are read.
-  let extraPrompt = null;
-
   // AGENTS.md and CLAUDE.md, in the user's folder and in the working folder and above it, as the host
   // read them: { text, files }. They go to the model with everything else the user keeps for it.
   let instructions = { text: '', files: [] };
   let instructionsSeq = 0;
   let pendingInstructions = null;
 
-  // All the text added to the hidden prompt: the instruction files, then evil.txt when it is on.
+  // All the text added to the hidden prompt: the instruction files.
   function buildExtra() {
-    return [instructions.text, settings.evilOn && extraPrompt ? extraPrompt.text : ''].filter(Boolean).join('\n\n');
+    return instructions.text;
   }
-  let pendingPromptFile = null;
   const PROMPT_ANSWER_MS = 5000;
-
-  // Asks the host for the file. Resolves with its answer, or with an error if it never comes.
-  function readPromptFile() {
-    return new Promise((resolve) => {
-      if (!port || !hostInfo) {
-        resolve({ text: null, error: 'The shell host is not connected.' });
-        return;
-      }
-      // An older host ignores the request and never answers, so it is named instead of waited for.
-      if (!(hostInfo.features || []).includes('read-prompt')) {
-        resolve({
-          text: null,
-          error: 'The installed shell host is older than this extension and cannot read evil.txt. Run the setup again, or node host/install.js in the project folder, then restart the browser.',
-        });
-        return;
-      }
-      const id = `prompt-${Date.now()}`;
-      const timer = setTimeout(() => {
-        pendingPromptFile = null;
-        resolve({ text: null, error: 'The shell host did not answer.' });
-      }, PROMPT_ANSWER_MS);
-      pendingPromptFile = { id, pieces: [], done: (answer) => { clearTimeout(timer); resolve(answer); } };
-      port.postMessage({ type: 'read-prompt', id });
-    });
-  }
-
-  async function loadExtraPrompt() {
-    const answer = await readPromptFile();
-    extraPrompt = answer.text ? answer : null;
-    pushConfig();
-    return answer;
-  }
 
   // Asks the host for the instruction files of the current working folder. An older host that cannot
   // read them, or one that does not answer, simply gives none.
@@ -264,35 +227,8 @@
     pushConfig();
   }
 
-  // The red theme and the evil logos (evil.css, logos.css) show only while /evil is on, so turning it
-  // off brings the originals back. Turning it on or off plays the awakening animation, which switches
-  // the look at the right moment (syncEvilLook); the library is optional so a missing file only skips it.
-  // The tougher greetings on an empty chat (evil-greeting.js) come and go with the look.
-  const greeting = globalThis.DsxEvilGreeting
-    ? globalThis.DsxEvilGreeting.createEvilGreeting()
-    : { start() {}, stop() {} };
-
-  // Puts the page in the look the setting asks for. The animation calls this under its glitch, so it
-  // reads the setting at that moment and works the same way for turning the look on and off.
-  function syncEvilLook() {
-    document.documentElement.toggleAttribute('data-dsx-evil', Boolean(settings.evilOn));
-    if (settings.evilOn) greeting.start();
-    else greeting.stop();
-  }
-
-  const awakening = globalThis.DsxEvilAwakening
-    ? globalThis.DsxEvilAwakening.createEvilAwakening({ onActivate: syncEvilLook })
-    : { play: syncEvilLook, isPlaying: () => false };
-
-  // While the animation plays it decides when the look changes, so a settings change in between waits.
-  function applyEvilLook() {
-    if (awakening.isPlaying()) return;
-    syncEvilLook();
-  }
-
   chrome.storage.local.get(DEFAULT_SETTINGS).then((stored) => {
     settings = stored;
-    applyEvilLook();
     pushConfig();
     renderControls();
     thinkCollapser.scan();
@@ -309,7 +245,6 @@
       loadInstructions();
       loadMcp();
     }
-    applyEvilLook();
     pushConfig();
     renderControls();
     thinkCollapser.scan();
@@ -383,19 +318,6 @@
           pendingUpdateAnswer = null;
         }
         break;
-      case 'prompt-file':
-        if (pendingPromptFile && message.id === pendingPromptFile.id) {
-          // The text arrives in numbered pieces, and the answer is complete with the last one. A host
-          // that sends it whole has no part numbers and is a single piece.
-          pendingPromptFile.pieces.push(message.text || '');
-          if (!(message.part < message.parts - 1)) {
-            const done = pendingPromptFile.done;
-            const text = pendingPromptFile.pieces.join('');
-            pendingPromptFile = null;
-            done({ ...message, text: message.error ? null : text });
-          }
-        }
-        break;
       case 'instructions':
         if (pendingInstructions && message.id === pendingInstructions.id) {
           pendingInstructions.pieces.push(message.text || '');
@@ -414,9 +336,6 @@
         pushConfig();
         renderControls();
         if (hostInfo) runApprovedCommands();
-        // The file is read again each time the host connects, so an edit takes effect on a reload.
-        // A page that just loaded has no text yet, so a reload reads evil.txt again.
-        if (hostInfo && settings.evilOn && !extraPrompt) loadExtraPrompt();
         if (hostInfo) loadInstructions();
         if (hostInfo) loadMcp();
         helperHello();
@@ -1236,7 +1155,6 @@
     onSelectWorkspace: (cwd) => saveSettings({ cwd }),
     onSetThinking: (thinking) => saveSettings({ thinking }),
     onDismissUpdate: (tag) => saveSettings({ dismissedUpdate: tag }),
-    onToggleEvil: toggleEvilFromButton,
     onToggleTerminal: () => terminal.toggle(),
     // A row of the Agents menu: the helper's tab comes to the front, or its chat opens in a new one.
     onOpenAgent: (id) => { if (port) port.postMessage({ type: 'agent-open', id }); },
@@ -1260,24 +1178,6 @@
   // A helper's tab and a tab opened to look at a helper's chat both offer the way back.
   if (helper) controls.setBack(true);
 
-  // The Evil Mode button in the sidebar does what /evil does and answers in the same small panel.
-  let evilBusy = false;
-
-  async function toggleEvilFromButton() {
-    if (evilBusy) return;
-    evilBusy = true;
-    renderControls();
-    try {
-      const answer = await toggleEvil();
-      if (answer && answer.lines && answer.lines.length) slashCommands.showMessage(answer.lines, answer.error);
-    } catch (error) {
-      slashCommands.showMessage([error && error.message ? error.message : 'Evil Mode failed.'], true);
-    } finally {
-      evilBusy = false;
-      renderControls();
-    }
-  }
-
   function renderControls() {
     controls.update({
       alive: extensionAlive(),
@@ -1287,7 +1187,6 @@
       picking: Boolean(folderRequest),
       pickError: folderError,
       update: updateInfo,
-      evilBusy,
     });
   }
 
@@ -1337,44 +1236,6 @@
     for (const problem of mcpInfo.errors) lines.push(`  ${problem.path}: ${problem.message}`);
     if (!lines.length) return [`MCP servers: ${mcpInfo.asked ? 'none set up in Claude Code, Codex or ~/.dsx/mcp.json' : 'not asked yet'}`];
     return [`MCP servers${mcpInfo.done ? '' : ' (still starting)'}:`, ...lines];
-  }
-
-  // What to tell the user when evil.txt cannot be used.
-  function describePromptProblem(answer) {
-    if (answer.error === 'missing') return ['There is no evil.txt yet. Create it here and put your instructions in it:', answer.path];
-    if (answer.error === 'empty') return ['evil.txt is empty. Put your instructions in it:', answer.path];
-    return [answer.error || 'evil.txt could not be read.'];
-  }
-
-  // The file has no limit here. DeepSeek has one of its own, which is not known, so a very long text
-  // only gets a warning.
-  const LONG_PROMPT_CHARS = 100000;
-
-  function describePromptSize(text) {
-    const size = `${text.length} characters`;
-    return text.length > LONG_PROMPT_CHARS ? `${size}, which is very long: DeepSeek may refuse a message this size` : size;
-  }
-
-  // Turns the user's own instructions on or off. The /evil command and the Evil Mode button both do this.
-  async function toggleEvil() {
-    if (settings.evilOn) {
-      saveSettings({ evilOn: false });
-      settings.evilOn = false;
-      extraPrompt = null;
-      pushConfig();
-      // The same animation as turning it on: it brings the original look back under its glitch.
-      awakening.play();
-      // Turning it off says nothing: the button and the original look already show it.
-      return { lines: [] };
-    }
-    const answer = await loadExtraPrompt();
-    if (!answer.text) return { error: true, lines: describePromptProblem(answer) };
-    saveSettings({ evilOn: true });
-    // Settings reach this script a moment later, so the look is switched on by the animation.
-    settings.evilOn = true;
-    awakening.play();
-    // Turning it on says nothing either, except when the text is so long that DeepSeek may refuse it.
-    return { lines: answer.text.length > LONG_PROMPT_CHARS ? [`On: ${describePromptSize(answer.text)} from evil.txt.`] : [] };
   }
 
   // The menu: three groups. Only commands that work are listed.
@@ -1449,7 +1310,6 @@
           `Thinking blocks: ${settings.collapseThinking === false ? 'left as DeepSeek shows them' : 'kept collapsed'}`,
           ...describeInstructions(),
           ...describeMcp(),
-          `Your instructions (evil.txt): ${settings.evilOn ? (extraPrompt ? `on, ${extraPrompt.text.length} characters` : 'on, not read yet') : 'off'}`,
         ],
       }),
     },
@@ -1467,15 +1327,6 @@
         saveSettings({ collapseThinking: arg === 'collapse' });
         return { lines: [arg === 'collapse' ? 'Thinking blocks are kept collapsed.' : 'Thinking blocks are left as DeepSeek shows them.'] };
       },
-    },
-    {
-      name: 'evil',
-      group: 'Skills',
-      icon: 'flame',
-      description: 'Turn your own instructions from evil.txt on or off',
-      // One command, no arguments: it switches. The file is read when it is turned on and again every
-      // time the page loads, so an edit takes effect after a reload. Its text is never printed back.
-      run: toggleEvil,
     },
     {
       name: 'update',

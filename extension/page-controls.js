@@ -24,7 +24,6 @@
     plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 12h1v4h1"/>',
     terminal: '<path d="M5 7l5 5l-5 5"/><path d="M12 17h7"/>',
-    flame: '<path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z"/>',
     // The Agents button: a small robot, the head with an antenna and two eyes.
     agents: '<path d="M6 8h12a2 2 0 0 1 2 2v7a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-7a2 2 0 0 1 2 -2z"/><path d="M12 8v-4"/><path d="M12 4h.01"/><path d="M9 13v.01"/><path d="M15 13v.01"/><path d="M9.5 16.5h5"/>',
     arrowLeft: '<path d="M5 12h14"/><path d="M5 12l6 6"/><path d="M5 12l6 -6"/>',
@@ -74,61 +73,6 @@
     @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
     @media (prefers-reduced-motion: reduce) { .live { animation: none; } }
   `;
-
-  // The Evil Mode button, next to "New chat" in the sidebar. It takes the height of the row, so it stays
-  // round whatever size DeepSeek gives that button, and it copies the fill, the corners and the text
-  // colour of "New chat" (mount() sets --dsx-bg, --dsx-radius and --dsx-color), so the two look like a
-  // pair. On, it turns red.
-  const EVIL_BUTTON_STYLES = `
-    :host { display: flex; flex: none; align-self: stretch; aspect-ratio: 1 / 1; min-width: 34px; }
-    button {
-      box-sizing: border-box; width: 100%; height: 100%; display: inline-flex; align-items: center; justify-content: center; padding: 0;
-      border-radius: var(--dsx-radius, 999px); cursor: pointer; user-select: none; outline: none; font: inherit; position: relative;
-      color: var(--dsx-color, var(--dsw-alias-label-primary, #f9fafb)); border: 1px solid transparent;
-      background: var(--dsx-bg, color-mix(in srgb, var(--dsw-alias-label-primary, #f9fafb) 10%, transparent));
-      box-shadow: var(--dsx-shadow, none);
-      transition: background .2s ease, border .2s ease, color .2s ease;
-    }
-    button:hover { background: color-mix(in srgb, var(--dsx-bg, var(--dsw-alias-bg-layer-3, #2b2c2f)) 90%, var(--dsw-alias-label-primary, #f9fafb) 10%); }
-    button:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); }
-    button.on { color: var(--dsw-alias-state-error-primary, #f25a5a); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 55%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 12%, transparent); }
-    button.on:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f25a5a) 20%, transparent); }
-    button.busy { opacity: .4; cursor: progress; }
-    svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    @media (prefers-reduced-motion: reduce) { button { transition: none; } }
-  `;
-
-  // The row of the "New chat" button, found from the logo above it instead of from DeepSeek's class
-  // names: the logo's row is followed by the row that holds the button. Null when the sidebar is not
-  // laid out like that, and then the Evil Mode button is simply not shown.
-  function findNewChatRow() {
-    const logo = document.querySelector('svg[viewBox="0 0 143 23"]');
-    const header = logo && logo.parentElement && logo.parentElement.parentElement;
-    const row = header && header.nextElementSibling;
-    const button = row && row.firstElementChild;
-    return button && button.querySelector('[tabindex]') ? row : null;
-  }
-
-  // DeepSeek draws the shortcut hint of "New chat" ("Ctrl J") with a ::after rule on the button, shown on
-  // hover. Once the button gives room to the Evil Mode button the hint lands on top of the label, so the
-  // button is marked here and page.css switches the hint off. The marked element is the pill itself,
-  // the one with a tabindex, found from the row and not from DeepSeek's class names.
-  function markNewChatButton(row) {
-    const pill = row.firstElementChild && row.firstElementChild.querySelector('[tabindex]');
-    if (pill && !pill.hasAttribute('data-dsx-newchat')) pill.setAttribute('data-dsx-newchat', '');
-    return pill;
-  }
-
-  // The look of the "New chat" button: the first element inside it that is actually filled.
-  function readNewChatLook(button) {
-    for (const node of [button, ...button.querySelectorAll('*')]) {
-      const style = getComputedStyle(node);
-      if (/^rgba?\(\s*\d+[ ,]+\d+[ ,]+\d+\s*\)$/.test(style.backgroundColor) || /rgba?\(.*[ ,/]\s*0?\.[1-9]/.test(style.backgroundColor)) {
-        return { bg: style.backgroundColor, radius: style.borderTopLeftRadius, color: style.color, shadow: style.boxShadow };
-      }
-    }
-    return null;
-  }
 
   // The top right corner: the connection pill, and to its left a link to the new release when
   // there is one. Both share one fixed row, so they never overlap whatever their width.
@@ -267,8 +211,8 @@
   }
 
   // ---- Mode switch wave ------------------------------------------------------------------------
-  // A short pixel wave across the composer when the permission mode changes: white, or red in Evil Mode,
-  // where it also flickers: it is redrawn in steps, a frame now and then drops out, the edge shimmers
+  // A short pixel wave across the composer when the permission mode changes: white, or red and flickering,
+  // in which case it is redrawn in steps, a frame now and then drops out, the edge shimmers
   // and the red changes in strength from frame to frame. Cells are
   // dithered with a Bayer matrix and a little fixed noise, so the front reads as a detailed pixel
   // pattern instead of a smooth gradient.
@@ -285,7 +229,6 @@
   const FLICKER_DROP_CHANCE = 0.2;
   const WAVE_TONES = {
     light: { rgb: [255, 255, 255], alpha: 0.6 },
-    // Evil Mode, whatever the preset.
     danger: { rgb: [242, 90, 90], alpha: 0.75 },
     // White would vanish on DeepSeek's light theme, so it turns into a soft grey there.
     lightOnLight: { rgb: [96, 102, 118], alpha: 0.42 },
@@ -473,7 +416,7 @@
     return iconMarkup('chevronDown').replace('<svg ', '<svg class="chev" ');
   }
 
-  function createPageControls({ onPickFolder, onChangeMode, onSelectWorkspace, onSetThinking, onDismissUpdate, onToggleEvil, onToggleTerminal, onOpenAgent, onDismissAgent, onClearAgents, onBack }) {
+  function createPageControls({ onPickFolder, onChangeMode, onSelectWorkspace, onSetThinking, onDismissUpdate, onToggleTerminal, onOpenAgent, onDismissAgent, onClearAgents, onBack }) {
     const { MODES, MODEL_NAME, DEFAULT_WORKSPACE, basename, modeLabel } = root.DsxMenus;
     const pill = attach(
       'dsx-status',
@@ -519,9 +462,6 @@
     const statsLine = stats.shadow.querySelector('.line');
     let statsText = '';
 
-    const evil = attach('dsx-evil-button', EVIL_BUTTON_STYLES, `<button type="button" data-action="toggle-evil">${iconMarkup('flame')}</button>`);
-    const evilButton = evil.shadow.querySelector('button');
-
     const pillBox = pill.shadow.querySelector('.status');
     const workspaceButton = workspace.shadow.querySelector('button');
     const workspaceLabel = workspace.shadow.querySelector('.label');
@@ -547,10 +487,9 @@
     let nativeToggles = { think: null, search: null };
     const toggleSync = { lastClick: { think: 0, search: 0 }, tries: { think: 0, search: 0 } };
     // What each tooltip says right now. The tooltips read it when they show, and update() fills it in.
-    const tips = { terminal: 'Open the terminal', pill: '', workspace: '', permission: '', attach: 'Attach files', evil: '', agents: '', back: 'Back to the main chat', update: 'Open the release page. Run the new setup and the extension updates itself.' };
+    const tips = { terminal: 'Open the terminal', pill: '', workspace: '', permission: '', attach: 'Attach files', agents: '', back: 'Back to the main chat', update: 'Open the release page. Run the new setup and the extension updates itself.' };
     tooltip.bind(agentsButton, () => tips.agents);
     tooltip.bind(backButton, () => tips.back);
-    tooltip.bind(evilButton, () => tips.evil);
     tooltip.bind(terminalButton, () => tips.terminal);
     tooltip.bind(pillBox, () => tips.pill);
     tooltip.bind(updateLink, () => tips.update);
@@ -560,8 +499,7 @@
 
     // The host sits in the page's own tree, so the wave can find the composer from it.
     function playModeWave(next) {
-      // White, and red (flickering) whatever the preset while Evil Mode is on.
-      wave.play(permission.host, document.documentElement.hasAttribute('data-dsx-evil') ? 'danger' : 'light');
+      wave.play(permission.host, 'light');
     }
 
     const menus = root.DsxMenus.createMenus({
@@ -625,7 +563,6 @@
     const trusted = (handler) => (event) => {
       if (event.isTrusted) handler();
     };
-    evilButton.addEventListener('click', trusted(onToggleEvil));
     terminalButton.addEventListener('click', trusted(onToggleTerminal));
     updateClose.addEventListener('click', trusted(() => onDismissUpdate(updateTag)));
     workspaceButton.addEventListener('click', trusted(() => openMenu('workspace', workspace.host)));
@@ -635,7 +572,7 @@
     modelButton.addEventListener('click', trusted(() => openMenu('model', model.host)));
     attachButton.addEventListener('click', trusted(openFileDialog));
 
-    function update({ alive, settings, hostInfo, hostError, picking, pickError, update: newerRelease, evilBusy }) {
+    function update({ alive, settings, hostInfo, hostError, picking, pickError, update: newerRelease }) {
       const workspaces = Array.isArray(settings.workspaces) ? settings.workspaces : [];
       current = {
         mode: MODES.some((entry) => entry.id === settings.mode) ? settings.mode : 'ask',
@@ -664,12 +601,6 @@
         bypass: 'Commands run without asking',
       }[current.mode];
       permissionButton.innerHTML = `${iconMarkup('shield')}<span>${modeLabel(current.mode)}</span>${chevron()}`;
-
-      const evilOn = Boolean(settings.evilOn);
-      evilButton.className = [evilOn ? 'on' : '', evilBusy ? 'busy' : ''].join(' ').trim();
-      evilButton.setAttribute('aria-pressed', String(evilOn));
-      evilButton.setAttribute('aria-label', `Evil Mode: ${evilOn ? 'on' : 'off'}`);
-      tips.evil = evilOn ? 'Evil Mode: on. Click to turn it off.' : 'Evil Mode: off. Click to turn it on.';
 
       workspaceButton.className = ['workspace', picking ? 'busy' : ''].join(' ').trim();
       workspaceLabel.textContent = current.cwd ? basename(current.cwd) : DEFAULT_WORKSPACE;
@@ -778,20 +709,6 @@
     function mount() {
       if (document.body && !pill.host.isConnected) document.body.append(pill.host);
       if (document.body && !tooltip.host.isConnected) document.body.append(tooltip.host);
-      // The sidebar row. data-dsx-row lets page.css turn it into a row of two, so "New chat" shrinks.
-      const row = findNewChatRow();
-      if (row) {
-        if (!row.hasAttribute('data-dsx-row')) row.setAttribute('data-dsx-row', '');
-        if (evil.host.parentElement !== row) row.append(evil.host);
-        const pill = markNewChatButton(row);
-        const look = pill && readNewChatLook(pill);
-        if (look) {
-          evil.host.style.setProperty('--dsx-bg', look.bg);
-          evil.host.style.setProperty('--dsx-radius', look.radius);
-          evil.host.style.setProperty('--dsx-color', look.color);
-          evil.host.style.setProperty('--dsx-shadow', look.shadow);
-        }
-      }
       const group = findComposerToggleGroup();
       if (!group) return;
       if (attachment.host.parentElement !== group) group.prepend(attachment.host);

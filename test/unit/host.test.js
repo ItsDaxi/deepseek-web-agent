@@ -69,48 +69,8 @@ test('hello reports the environment', async () => {
   // The host names the version of the extension files beside it, so the browser can tell when it is behind.
   const { version } = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'extension', 'manifest.json'), 'utf8'));
   assert.equal(hello.extensionVersion, version);
-  assert.ok(hello.features.includes('read-prompt'));
   assert.ok(hello.features.includes('read-instructions'));
   host.stop();
-});
-
-test('the prompt file is read with its text, and its problems are named', async () => {
-  const fs = require('node:fs');
-  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'dsx-prompt-'));
-  const file = path.join(folder, 'evil.txt');
-  const host = startHost({ DSX_PROMPT_FILE: file });
-  // The text comes in numbered pieces, and the answer is whole with the last one.
-  const ask = async (id) => {
-    host.send({ type: 'read-prompt', id });
-    const last = await host.waitFor((m) => m.type === 'prompt-file' && m.id === id && !(m.part < m.parts - 1));
-    const pieces = host.messages.filter((m) => m.type === 'prompt-file' && m.id === id);
-    return { ...last, text: last.error ? null : pieces.map((m) => m.text).join(''), pieces: pieces.length };
-  };
-  try {
-    assert.equal((await ask('missing')).error, 'missing');
-
-    fs.writeFileSync(file, '﻿  \r\n');
-    assert.equal((await ask('empty')).error, 'empty');
-
-    fs.writeFileSync(file, '﻿Be brief.\r\nAnswer in Italian.\r\n');
-    const read = await ask('read');
-    assert.equal(read.error, null);
-    assert.equal(read.text, 'Be brief.\nAnswer in Italian.');
-    assert.equal(read.pieces, 1);
-    assert.equal(read.path, file);
-
-    // No limit: a long text arrives whole, in several pieces, with accents and emoji intact even
-    // when a piece ends in the middle of one.
-    const unit = 'Perché 😀 àèìòù. ';
-    const long = unit.repeat(40_000);
-    fs.writeFileSync(file, long);
-    const big = await ask('long');
-    assert.ok(big.pieces > 5, String(big.pieces));
-    assert.equal(big.text, long.trim());
-  } finally {
-    host.stop();
-    fs.rmSync(folder, { recursive: true, force: true });
-  }
 });
 
 test('a successful command streams output and exits 0', async () => {
@@ -352,22 +312,3 @@ test('the instruction files are read for the working folder, in numbered pieces'
   }
 });
 
-test('an evil.txt in the user folder is used before the shipped one', async () => {
-  const fs = require('node:fs');
-  const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsx-userdir-'));
-  fs.writeFileSync(path.join(userDir, 'evil.txt'), 'From the user folder.');
-  const host = startHost({ DSX_USER_DIR: userDir });
-  try {
-    host.send({ type: 'read-prompt', id: 'own' });
-    const own = await host.waitFor((m) => m.type === 'prompt-file' && m.id === 'own');
-    assert.equal(own.text, 'From the user folder.');
-    assert.equal(own.path, path.join(userDir, 'evil.txt'));
-    fs.rmSync(path.join(userDir, 'evil.txt'));
-    host.send({ type: 'read-prompt', id: 'shipped' });
-    const shipped = await host.waitFor((m) => m.type === 'prompt-file' && m.id === 'shipped');
-    assert.equal(shipped.path, path.join(__dirname, '..', '..', 'evil.txt'));
-  } finally {
-    host.stop();
-    fs.rmSync(userDir, { recursive: true, force: true });
-  }
-});
