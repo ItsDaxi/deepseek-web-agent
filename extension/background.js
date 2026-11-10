@@ -72,6 +72,11 @@ function connectHost() {
       reloadIfFilesAreNewer(message.extensionVersion).catch(() => {});
       return;
     }
+    // The MCP servers belong to the host, not to one tab: every tab hears when one starts, fails or stops.
+    if (message.type === 'mcp-servers') {
+      broadcast(message);
+      return;
+    }
     const owner = jobOwners.get(message.id);
     if (owner) owner.postMessage(message);
     // A text sent in pieces keeps its owner until the last piece has gone through.
@@ -517,6 +522,14 @@ function handleTabMessage(port, message) {
       }
       jobOwners.set(message.id, port);
       nativePort.postMessage({ type: 'read-instructions', id: message.id, cwd: message.cwd });
+      break;
+    case 'mcp-list':
+      connectHost();
+      if (!nativePort) {
+        port.postMessage({ type: 'mcp-servers', id: message.id, done: true, files: [], errors: [{ path: 'shell host', message: hostError || 'The shell host is not connected.' }], text: '[]', part: 0, parts: 1 });
+        return;
+      }
+      nativePort.postMessage({ type: 'mcp-list', id: message.id, cwd: message.cwd });
       break;
     case 'kill':
       if (nativePort) nativePort.postMessage(message);

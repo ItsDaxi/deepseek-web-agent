@@ -37,6 +37,8 @@
   const pendingResults = new Map();
   // The instructions already sent in each chat, by session id.
   const extraSent = new Map();
+  // The MCP tool list already sent in each chat, by session id.
+  const mcpSent = new Map();
   const resultQueue = [];
   let activeStreams = 0;
   let pumping = false;
@@ -104,9 +106,16 @@
       const sent = extraSent.get(request.sessionId) || '';
       const extra = wanted && wanted !== sent ? wanted : null;
       const retire = !wanted && Boolean(sent);
-      body.prompt = Protocol.injectPrompt(body.prompt, config.env, { full, extra, retire, agents: !config.agent });
+      // The tools of the user's MCP servers follow the same rule: once per chat, and again when they change.
+      const wantedMcp = Protocol.describeMcp(config.env && config.env.mcp);
+      const sentMcp = mcpSent.get(request.sessionId) || '';
+      const mcp = wantedMcp && wantedMcp !== sentMcp ? wantedMcp : null;
+      const mcpRetire = !wantedMcp && Boolean(sentMcp);
+      body.prompt = Protocol.injectPrompt(body.prompt, config.env, { full, extra, retire, agents: !config.agent, mcp, mcpRetire });
       if (extra) extraSent.set(request.sessionId, extra);
       if (retire) extraSent.delete(request.sessionId);
+      if (mcp) mcpSent.set(request.sessionId, mcp);
+      if (mcpRetire) mcpSent.delete(request.sessionId);
       // `first` is the opening message of a chat, so the stats of a chat can tell it was followed from the start.
       post({ type: 'user-turn', sessionId: request.sessionId, first: full });
     }

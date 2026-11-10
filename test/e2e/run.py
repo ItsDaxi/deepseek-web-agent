@@ -21,6 +21,16 @@ MOCK_PAGE = (Path(__file__).parent / "mock-deepseek.html").read_text(encoding="u
 PROMPT_FILE = Path(tempfile.gettempdir()) / f"dsx-e2e-evil-{os.getpid()}.txt"
 # The user folder of the host (~/.dsx in real life), empty until a test puts instruction files in it.
 USER_DIR = Path(tempfile.gettempdir()) / f"dsx-e2e-user-{os.getpid()}"
+# Where the host would look for the MCP setups of Claude Code and Codex. Empty, so a run never starts the real
+# servers of whoever runs it. The MCP test puts a config in USER_DIR instead.
+MCP_HOME = Path(tempfile.gettempdir()) / f"dsx-e2e-mcp-home-{os.getpid()}"
+HOST_ENV = {
+    "DSX_PROMPT_FILE": str(PROMPT_FILE),
+    "DSX_USER_DIR": str(USER_DIR),
+    "CLAUDE_CONFIG_DIR": str(MCP_HOME),
+    "CODEX_HOME": str(MCP_HOME / ".codex"),
+}
+FAKE_MCP_SERVER = ROOT / "test" / "helpers" / "fake-mcp-server.js"
 SESSION_ID = "11111111-2222-3333-4444-555555555555"
 CHAT_URL = f"https://chat.deepseek.com/a/chat/s/{SESSION_ID}"
 SCREENSHOTS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
@@ -50,6 +60,7 @@ SCRIPT = {
     "read outside": '<dsx:read path="C:\\Windows\\win.ini"></dsx:read>',
     "read the secret": '<dsx:read path=".env"></dsx:read>',
     "bypass run": "<dsx:shell>\necho dsx-bypass-output\n</dsx:shell>",
+    "call the mcp tool": '<dsx:mcp server="fake" tool="echo">{"text": "dsx-e2e-mcp"}</dsx:mcp>',
     "bypass danger": f"<dsx:shell>\n{DANGER}\n</dsx:shell>",
 }
 
@@ -672,6 +683,34 @@ def run(context, server):
     project.rmdir()
     pause(1)
 
+    # MCP: the servers set up for Claude Code and Codex are listed to the model, and a call goes through approval.
+    check("no MCP server, nothing about one", "Server fake:" not in send_and_wait("before any server"))
+    USER_DIR.mkdir(exist_ok=True)
+    (USER_DIR / "mcp.json").write_text(json.dumps({"mcpServers": {"fake": {"command": "node", "args": [str(FAKE_MCP_SERVER)]}}}), encoding="utf-8")
+    reload_page()
+    run_command("/status")
+    check("/status lists the MCP server and its tools", wait_until(lambda: "fake (dsx, stdio): 5 tools" in shadow.text(), message="status mcp"), shadow.text()[-400:])
+    first = send_and_wait("with an mcp server")
+    check("the tools of the server go with the next message", "Server fake:" in first and "- echo(text*: string (What to repeat.))" in first, first[-400:])
+    check("they are in a hidden block, and never show in the chat", "<dsx:system>You can also use tools of MCP servers" in first and "Server fake:" not in visible_text(page))
+    check("they are sent once, not with every message", "Server fake:" not in send_and_wait("and again"))
+    send_and_wait("call the mcp tool please")
+    check("an MCP call asks first", wait_until(lambda: "Call this MCP tool?" in shadow.card_text() and shadow.actions("run"), message="mcp approval"), shadow.card_text())
+    check("the approval shows the server, the tool and the arguments", "fake" in shadow.card_text() and "echo" in shadow.card_text() and "dsx-e2e-mcp" in shadow.card_text(), shadow.card_text())
+    count = len(server.requests)
+    shadow.click_last("run")
+    check("the call runs and its card is titled with the server and the tool", wait_until(lambda: "Call this MCP tool?" not in shadow.card_text() and "MCP fake: echo" in shadow.card_text(), message="mcp ran"), shadow.card_text())
+    check("the result goes back to the model with the name of the call", wait_until(lambda: len(server.requests) > count and 'tool="mcp"' in server.requests[-1]["prompt"] and "echo: dsx-e2e-mcp" in server.requests[-1]["prompt"] and 'command="fake.echo"' in server.requests[-1]["prompt"], message="mcp result sent"))
+    (USER_DIR / "mcp.json").unlink()
+    USER_DIR.rmdir()
+    # A change of workspace makes the host read the config again, and the tools are gone.
+    worker.evaluate("(cwd) => chrome.storage.local.set({ cwd })", str(WORKDIR))
+    pause(1.5)
+    check("the chat is told when the tools are gone", "MCP tools you were told about earlier are no longer available" in send_and_wait("after the mcp server"))
+    check("and only once", "no longer available" not in send_and_wait("and once more"))
+    worker.evaluate("() => chrome.storage.local.set({ cwd: '' })")
+    pause(1)
+
     # The stats line under the composer in a conversation, and the glow on a new chat.
     send_and_wait("one more for the stats")
     pattern = re.compile(r"\d+ turns? · \d+ steps?")
@@ -877,7 +916,7 @@ def main():
                 viewport={"width": 1100, "height": 900},
                 args=[f"--disable-extensions-except={EXTENSION}", f"--load-extension={EXTENSION}", "--no-first-run"],
                 # The host inherits this, so /evil reads a file of the test and never a real one.
-                env={**os.environ, "DSX_PROMPT_FILE": str(PROMPT_FILE), "DSX_USER_DIR": str(USER_DIR)},
+                env={**os.environ, **HOST_ENV},
                 **target,
             )
             try:

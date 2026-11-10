@@ -258,7 +258,7 @@ def main():
                 profile,
                 viewport={"width": 1100, "height": 900},
                 args=[f"--disable-extensions-except={harness.EXTENSION}", f"--load-extension={harness.EXTENSION}", "--no-first-run"],
-                env={**os.environ, "DSX_PROMPT_FILE": str(harness.PROMPT_FILE), "DSX_USER_DIR": str(harness.USER_DIR)},
+                env={**os.environ, **harness.HOST_ENV},
                 channel="chromium",
                 headless=True,
             )

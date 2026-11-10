@@ -10,6 +10,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { readInstructions } = require('./instructions.js');
+const { readMcpConfig, configPaths } = require('./mcp-config.js');
+const { createMcpManager } = require('./mcp.js');
 
 const VERSION = '0.1.0';
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -468,8 +470,76 @@ function runFileTool(request) {
   worker.on('exit', () => finish({ status: job.stopReason || 'spawn_error', code: null, error: job.stopReason ? undefined : 'The tool stopped unexpectedly.' }));
 }
 
+// The MCP servers the user set up for Claude Code and Codex, started on demand and kept until the browser
+// goes away. `mcpList` is the request the extension is following: every change is sent to it as a snapshot.
+let mcpList = null;
+const mcp = createMcpManager({ onChange: () => sendMcpSnapshot() });
+
+function sendMcpSnapshot() {
+  if (!mcpList) return;
+  const { id, files, errors } = mcpList;
+  sendInPieces({ type: 'mcp-servers', id, done: mcp.isSettled(), files, errors }, JSON.stringify(mcp.snapshot()));
+}
+
+// Reads the config for the working folder and starts what is not running yet. The answer is not one
+// message: a server that takes long to start must not hold back the ones that are ready.
+function listMcpServers({ id, cwd }) {
+  const folder = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
+  const config = readMcpConfig({ cwd: folder, userDir: USER_DIR });
+  mcpList = { id, files: config.files, errors: config.errors };
+  mcp.configure({ servers: config.servers, cwd: folder }).then(sendMcpSnapshot);
+}
+
+// Parses the arguments the model wrote between the tags. Nothing at all means no arguments.
+function parseMcpArguments(body) {
+  const text = String(body || '').trim().replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```$/, '').trim();
+  if (!text) return {};
+  const value = JSON.parse(text);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('The arguments must be a JSON object.');
+  return value;
+}
+
+// Calls a tool of an MCP server and reports it exactly like a shell command.
+function runMcpTool({ id, server, mcpTool, body, timeoutMs }) {
+  if (running.has(id)) return;
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const job = { stopReason: null, abort: () => controller.abort() };
+  running.set(id, job);
+  send({ type: 'started', id });
+
+  const finish = (fields) => {
+    if (!running.has(id)) return;
+    running.delete(id);
+    const output = fields.output || '';
+    for (let index = 0; index < output.length; index += MAX_CHUNK_CHARS) {
+      send({ type: 'output', id, data: output.slice(index, index + MAX_CHUNK_CHARS) });
+    }
+    send({ type: 'exit', id, durationMs: Date.now() - startedAt, status: fields.status, code: fields.code });
+  };
+
+  let args;
+  try {
+    args = parseMcpArguments(body);
+  } catch (error) {
+    finish({ status: 'failed', code: 1, output: `The arguments are not valid JSON: ${error.message}` });
+    return;
+  }
+  mcp.call({
+    server,
+    tool: mcpTool,
+    args,
+    timeoutMs: Number(timeoutMs) > 0 ? Math.min(Number(timeoutMs), MAX_TIMEOUT_MS) : undefined,
+    signal: controller.signal,
+  }).then(
+    ({ text, isError }) => finish({ status: isError ? 'failed' : 'ok', code: isError ? 1 : 0, output: text || (isError ? 'The tool reported an error.' : 'The tool returned nothing.') }),
+    (error) => finish({ status: job.stopReason || (error.code === 'timeout' ? 'timeout' : 'failed'), code: 1, output: error.message }),
+  );
+}
+
 function stopJob(job) {
-  if (job.worker) job.worker.terminate();
+  if (job.abort) job.abort();
+  else if (job.worker) job.worker.terminate();
   else killTree(job.child);
 }
 
@@ -480,6 +550,9 @@ function handle(message) {
       break;
     case 'read-instructions':
       readInstructionFiles(message);
+      break;
+    case 'mcp-list':
+      listMcpServers(message);
       break;
     case 'pick-folder':
       try {
@@ -494,17 +567,20 @@ function handle(message) {
         version: VERSION,
         // What this host can do beyond running commands, so an extension newer than the host can say so
         // instead of waiting for an answer that never comes.
-        features: ['read-prompt', 'read-instructions'],
+        features: ['read-prompt', 'read-instructions', 'mcp'],
         extensionVersion: extensionVersion(),
         platform: process.platform,
         defaultShell: defaultShell(),
         shells: availableShells(),
         home: os.homedir(),
+        // Where the config files are, so the model can be told and edit them when the user asks.
+        config: configPaths({ userDir: USER_DIR }),
       });
       break;
     case 'exec':
       if (message.tool === 'poll') poll(message);
       else if (message.tool === 'kill') killJob(message);
+      else if (message.tool === 'mcp') runMcpTool(message);
       else if (message.tool && message.tool !== 'shell') runFileTool(message);
       else exec(message);
       break;
@@ -543,5 +619,6 @@ process.stdin.on('data', (chunk) => {
 // The browser closes stdin when the extension disconnects: never leave orphan commands behind.
 process.stdin.on('end', () => {
   for (const job of running.values()) stopJob(job);
+  mcp.closeAll();
   process.exit(0);
 });

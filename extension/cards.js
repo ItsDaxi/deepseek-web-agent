@@ -31,6 +31,7 @@
     grep: { question: 'Search inside these files?', icon: 'search', action: 'Allow', verb: 'Search' },
     poll: { question: 'Read this background job?', icon: 'clock', action: 'Allow', verb: 'Poll' },
     kill: { question: 'Stop this background job?', icon: 'stop', action: 'Stop', verb: 'Stop' },
+    mcp: { question: 'Call this MCP tool?', icon: 'plug', action: 'Allow' },
     // A helper starts by itself, so its question only shows for a call replayed from an old chat.
     agent: { question: 'Start a helper for this task?', icon: 'search', action: 'Start' },
   };
@@ -127,6 +128,7 @@
   // The one-line summary of a tool call.
   function toolTitle(tool) {
     if (tool.kind === 'agent') return `Helper: ${tool.attributes?.description || firstLine(tool.command) || 'working'}`;
+    if (tool.kind === 'mcp') return `MCP ${tool.attributes?.server || '?'}: ${tool.attributes?.tool || '?'}`;
     const { verb } = toolInfo(tool);
     if (!verb) return firstLine(tool.command);
     const subject = tool.kind === 'glob' || tool.kind === 'grep' ? firstLine(tool.command) : tool.path;
@@ -149,6 +151,16 @@
       return el('pre', { text: `${tool.command}\n\n[background]` });
     }
     switch (tool.kind) {
+      case 'mcp': {
+        // The arguments, laid out so they can be read before the call is approved.
+        let shown = tool.command || '';
+        try {
+          if (shown.trim()) shown = JSON.stringify(JSON.parse(shown), null, 2);
+        } catch {
+          // Not valid JSON: the host will say so, and the text is shown as it is.
+        }
+        return el('pre', { text: `${tool.attributes?.server || '?'} › ${tool.attributes?.tool || '?'}\n${shown || '(no arguments)'}` });
+      }
       case 'write':
         return el('pre', { className: 'content', text: tool.command });
       case 'edit': {
@@ -214,7 +226,7 @@
       return el(
         'div',
         { className: 'card' },
-        el('div', { className: 'head' }, icon('spinner', 'spin brand'), el('span', { className: 'title', text: isShell ? 'Writing command…' : `${toolInfo(tool).verb} ${tool.path}…`.replace(/ …$/, '…') })),
+        el('div', { className: 'head' }, icon('spinner', 'spin brand'), el('span', { className: 'title', text: isShell ? 'Writing command…' : tool.kind === 'mcp' ? 'Writing MCP call…' : `${toolInfo(tool).verb} ${tool.path}…`.replace(/ …$/, '…') })),
         (isShell || tool.kind === 'write') && tool.command ? el('pre', { className: 'content', text: tool.command, dataset: { follow: '1' } }) : null,
       );
     }
@@ -336,7 +348,7 @@
       });
       const card = el('div', { className: 'card' }, head);
       if (tool.expanded) {
-        if (tool.kind === 'write' || tool.kind === 'edit') {
+        if (tool.kind === 'write' || tool.kind === 'edit' || tool.kind === 'mcp') {
           card.append(toolDetail(tool));
         } else if (tool.kind === 'shell' && (tool.command.includes('\n') || tool.cwd)) {
           card.append(el('pre', { text: tool.cwd ? `# ${tool.cwd}\n${tool.command}` : tool.command }));

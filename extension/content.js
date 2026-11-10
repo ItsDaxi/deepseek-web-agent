@@ -149,7 +149,9 @@
   }
 
   function pushConfig() {
-    const env = hostInfo ? { ...hostInfo, cwd: settings.cwd, extra: buildExtra() } : null;
+    // A helper cannot ask the user to approve a call, so it is never told about the MCP tools.
+    const mcp = helper ? [] : mcpServers.filter((server) => server.status === 'ready' && server.tools.length);
+    const env = hostInfo ? { ...hostInfo, cwd: settings.cwd, extra: buildExtra(), mcp } : null;
     postToPage({ type: 'config', env, thinking: settings.thinking !== false, agent: Boolean(helper) });
   }
 
@@ -231,6 +233,37 @@
     pushConfig();
   }
 
+  // The MCP servers of the user's Claude Code and Codex setups, as the host reports them: one entry per
+  // server with its state and its tools. The host sends the whole list each time something changes, in
+  // numbered pieces that are joined here.
+  let mcpServers = [];
+  let mcpInfo = { files: [], errors: [], done: false, asked: false };
+  let mcpPieces = [];
+
+  // Asks the host to read the MCP config for the working folder and start the servers. Only the main
+  // chat does it: a helper does not use them. An older host does not know the request.
+  function loadMcp() {
+    if (helper || !port || !hostInfo || !(hostInfo.features || []).includes('mcp')) return;
+    mcpInfo = { ...mcpInfo, asked: true, done: false };
+    port.postMessage({ type: 'mcp-list', id: `mcp-${Date.now()}`, cwd: settings.cwd || hostInfo.home || '' });
+  }
+
+  function receiveMcpServers(message) {
+    if (!(message.part > 0)) mcpPieces = [];
+    mcpPieces.push(message.text || '');
+    if (message.part < message.parts - 1) return;
+    let servers = [];
+    try {
+      servers = JSON.parse(mcpPieces.join(''));
+    } catch {
+      servers = [];
+    }
+    mcpPieces = [];
+    mcpServers = Array.isArray(servers) ? servers : [];
+    mcpInfo = { files: message.files || [], errors: message.errors || [], done: Boolean(message.done), asked: true };
+    pushConfig();
+  }
+
   // The red theme and the evil logos (evil.css, logos.css) show only while /evil is on, so turning it
   // off brings the originals back. Turning it on or off plays the awakening animation, which switches
   // the look at the right moment (syncEvilLook); the library is optional so a missing file only skips it.
@@ -272,7 +305,10 @@
     if (Object.keys(changes).every((key) => !(key in DEFAULT_SETTINGS))) return;
     for (const [key, change] of Object.entries(changes)) settings[key] = change.newValue;
     if (changes.cwd) terminal.setWorkspace(settings.cwd);
-    if (changes.cwd && hostInfo) loadInstructions();
+    if (changes.cwd && hostInfo) {
+      loadInstructions();
+      loadMcp();
+    }
     applyEvilLook();
     pushConfig();
     renderControls();
@@ -382,7 +418,11 @@
         // A page that just loaded has no text yet, so a reload reads evil.txt again.
         if (hostInfo && settings.evilOn && !extraPrompt) loadExtraPrompt();
         if (hostInfo) loadInstructions();
+        if (hostInfo) loadMcp();
         helperHello();
+        break;
+      case 'mcp-servers':
+        receiveMcpServers(message);
         break;
       case 'agent-task':
         if (helper && message.agentId === helper.id && !helper.sent) {
@@ -673,6 +713,11 @@
     });
   }
 
+  // "server.tool", how an MCP call is named in a result.
+  function mcpName(tool) {
+    return `${tool.attributes?.server || '?'}.${tool.attributes?.tool || '?'}`;
+  }
+
   function firstLineOf(text) {
     return String(text || '').split('\n')[0].slice(0, 120);
   }
@@ -712,6 +757,9 @@
       timeoutMs: tool.timeoutSeconds * 1000,
       background: attributes.background === 'true',
       ...(tool.kind === 'poll' ? { waitMs: Number(attributes.wait) * 1000 || 0 } : {}),
+      // The tag's own `tool` attribute is the MCP tool; the message's `tool` says it is an MCP call. Without a
+      // timeout from the model, the host uses the one in the server's config.
+      ...(tool.kind === 'mcp' ? { mcpTool: attributes.tool || '', timeoutMs: Number(attributes.timeout) > 0 ? Number(attributes.timeout) * 1000 : undefined } : {}),
     });
   }
 
@@ -750,7 +798,7 @@
       output,
       // Inside a batch these two are what tie an output to the call that produced it.
       tool: tool.kind,
-      command: tool.kind === 'shell' ? tool.command : tool.path || tool.command,
+      command: tool.kind === 'shell' ? tool.command : tool.kind === 'mcp' ? mcpName(tool) : tool.path || tool.command,
     };
     if (message.job) result.job = message.job;
     if (started) result.note = `The command keeps running as background job ${message.job}. Read it with poll id="${message.job}".`;
@@ -1275,6 +1323,22 @@
     ];
   }
 
+  // For /status: the MCP servers found in the user's Claude Code and Codex setups, and what each one gives.
+  function describeMcp() {
+    if (!hostInfo || !(hostInfo.features || []).includes('mcp')) {
+      return ['MCP servers: the installed shell host is older than this extension. Run the setup again, or node host/install.js, then restart the browser'];
+    }
+    const lines = mcpServers.map((server) => {
+      const state = server.status === 'ready'
+        ? `${server.tools.length + (server.moreTools || 0)} tools`
+        : server.status === 'failed' ? `failed: ${server.error}` : server.status;
+      return `  ${server.name} (${server.source}, ${server.transport}): ${state}`;
+    });
+    for (const problem of mcpInfo.errors) lines.push(`  ${problem.path}: ${problem.message}`);
+    if (!lines.length) return [`MCP servers: ${mcpInfo.asked ? 'none set up in Claude Code, Codex or ~/.dsx/mcp.json' : 'not asked yet'}`];
+    return [`MCP servers${mcpInfo.done ? '' : ' (still starting)'}:`, ...lines];
+  }
+
   // What to tell the user when evil.txt cannot be used.
   function describePromptProblem(answer) {
     if (answer.error === 'missing') return ['There is no evil.txt yet. Create it here and put your instructions in it:', answer.path];
@@ -1384,6 +1448,7 @@
           `Effort: ${settings.thinking === false ? 'off' : 'on'}`,
           `Thinking blocks: ${settings.collapseThinking === false ? 'left as DeepSeek shows them' : 'kept collapsed'}`,
           ...describeInstructions(),
+          ...describeMcp(),
           `Your instructions (evil.txt): ${settings.evilOn ? (extraPrompt ? `on, ${extraPrompt.text.length} characters` : 'on, not read yet') : 'off'}`,
         ],
       }),

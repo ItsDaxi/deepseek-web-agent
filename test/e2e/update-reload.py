@@ -164,6 +164,8 @@ def main():
                 str(Path(workspace) / "profile"),
                 viewport={"width": 1100, "height": 900},
                 args=[f"--disable-extensions-except={extension_dir}", f"--load-extension={extension_dir}", "--no-first-run"],
+                # The host reads the MCP setups of Claude Code and Codex when a page connects: point it at an empty folder.
+                env={**os.environ, "CLAUDE_CONFIG_DIR": workspace, "CODEX_HOME": str(Path(workspace) / ".codex"), "DSX_USER_DIR": str(Path(workspace) / "user")},
                 **target,
             )
             context.route("https://chat.deepseek.com/**", lambda route: route.fulfill(status=200, headers={"content-type": "text/html"}, body=MOCK_PAGE))

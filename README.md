@@ -6,7 +6,7 @@ This is unofficial and has nothing to do with DeepSeek. It relies on the site's 
 
 ## What it does
 
-The extension adds a hidden prompt to your messages that teaches the model six tools: `read`, `write`, `edit`, `glob`, `grep` and `shell`, plus helpers for long jobs (see Helpers). When the model uses one, the extension takes the call out of the response before the page draws it, shows a card in its place, and runs the call through a small native program on your machine. The result goes back to the model as a hidden message.
+The extension adds a hidden prompt to your messages that teaches the model six tools: `read`, `write`, `edit`, `glob`, `grep` and `shell`, plus helpers for long jobs (see Helpers) and the tools of your MCP servers (see MCP servers). When the model uses one, the extension takes the call out of the response before the page draws it, shows a card in its place, and runs the call through a small native program on your machine. The result goes back to the model as a hidden message.
 
 The hidden prompt is added to outgoing requests and removed from the history again, so it never shows up in the chat. DeepSeek's own web search and DeepThink keep working.
 
@@ -99,7 +99,7 @@ A message that only starts with a slash, such as `/etc/hosts what is this file`,
 | `/feedback` | Opens the project's issue page in a new tab. |
 | `/permission` | Opens the permission presets, like the permission button. |
 | `/model` | Opens the model panel, like the model button. |
-| `/status` | Shows the extension version, the shell host, the permissions, the workspace, the instruction files found, the effort and the thinking setting. |
+| `/status` | Shows the extension version, the shell host, the permissions, the workspace, the instruction files found, the MCP servers and their tools, the effort and the thinking setting. |
 | `/thinking collapse` or `/thinking default` | Keeps the thinking blocks collapsed, or leaves them as DeepSeek shows them. |
 | `/terminal` | Opens or closes the side terminal. See below. |
 | `/evil` | Turns your own instructions for the model, read from `evil.txt`, on or off in the hidden prompt. See below. |
@@ -123,7 +123,7 @@ The extension reads `AGENTS.md` and `CLAUDE.md`, the files other coding agents u
 - **For every folder.** Put them in `.dsx` in your home folder, for example `C:\Users\you\.dsx\AGENTS.md`. The folder is yours: the extension never writes in it, and an update never touches it.
 - **For one folder.** Put them in the workspace you picked, or in any folder above it up to your home folder. A project can have its own, and a folder further up can have one for all its projects.
 
-The user's files come first, then the folders from the outermost to the working folder. When two of them disagree, the one listed last wins, so the file closest to your work has the final word. In each folder `AGENTS.md` comes before `CLAUDE.md`. Only these two names are read, only in those places, and nothing else on the disk. The files of other tools, such as `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`, are not read: copy or link the text into `.dsx` if you want it here.
+The user's files come first, then the folders from the outermost to the working folder. When two of them disagree, the one listed last wins, so the file closest to your work has the final word. In each folder `AGENTS.md` comes before `CLAUDE.md`. Only these two names are read, only in those places, and nothing else on the disk. The files of other tools, such as `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`, are not read: copy or link the text into `.dsx` if you want it here. Their MCP server lists are the exception: see MCP servers.
 
 The text goes out with your next message in each chat, once, and again only if it changes, which includes switching workspace. It sits in a hidden block, so it never shows in the chat. A file longer than 100,000 characters is cut, and together they stay under 300,000: past that, the ones furthest from the working folder are left out. `/status` lists the files that were found. They are read when the host connects and when you change workspace, so after editing one, reload the page or pick the workspace again.
 
@@ -150,6 +150,30 @@ While a chat has helpers, an **Agents** button appears above the composer, besid
 In the tab of a helper, or in a tab opened to look at one, a **Main chat** button at the top right, left of the terminal button, takes you back to the chat that asked. From a tab that was opened only to look at a finished helper, it also closes that tab; a working helper's tab stays open.
 
 A helper's chat shows up in your DeepSeek history like any other.
+
+### MCP servers
+
+The model can call the tools of the MCP servers you already set up for Claude Code and Codex. There is nothing to configure here: the native host reads their config files, starts the servers, lists their tools to the model in the hidden prompt, and runs the calls the model writes. A server behaves as it does in those two tools, because it is the same program speaking the same protocol, started with the same command, arguments and environment.
+
+The host reads these places and nothing else:
+
+| File | What is read |
+| --- | --- |
+| `~/.dsx/mcp.json` | `{ "mcpServers": { ... } }`, the same format as Claude Code's `.mcp.json`. Use it for a server only this tool should have. |
+| `~/.claude.json` | The user servers (`mcpServers`) and the servers of the workspace you picked (`projects`), minus the ones turned off for it. `CLAUDE_CONFIG_DIR` moves it. |
+| `~/.codex/config.toml` | The `[mcp_servers.*]` tables, with `startup_timeout_sec`, `tool_timeout_sec`, `enabled`, `enabled_tools`, `disabled_tools`, `cwd`, `bearer_token_env_var`, `http_headers` and `env_http_headers`. `CODEX_HOME` moves it. |
+
+When the same name is in more than one place, `~/.dsx/mcp.json` wins, then Claude Code, then Codex. Both stdio servers (a command) and streamable HTTP servers (a url) work. `${NAME}` and `${NAME:-default}` are expanded in Claude Code entries, as Claude Code does. On Windows a command such as `npx` is found the way the shell finds it.
+
+A project's own `.mcp.json` and `.codex/config.toml` are **not** read. They would make the host start a program named by a folder you may have just downloaded, which is the same risk as a hostile `AGENTS.md`, only worse. Put the server in one of the files above if you want it here.
+
+The servers start when the page connects to the host and when you change workspace, and stay up until the browser closes the connection. A server that takes long to start does not hold back the others: its tools reach the model with your next message once it is ready. `/status` lists each server, where it came from and how many tools it gave, or why it failed. The list in the prompt is capped at about 14,000 characters: past that, descriptions are cut first, then argument names, and only then tools.
+
+The model writes `<dsx:mcp server="github" tool="create_issue">{"title": "x"}</dsx:mcp>`, with the arguments as one JSON object. The card is titled `MCP github: create_issue` and shows the arguments. Every call asks for approval in Read Only and in Workspace Write, because a tool of someone else's server can do anything and its effect cannot be told from its name. Full access runs them at once, and "Always allow in this chat" works as it does for commands. A helper never gets MCP tools. The timeout is the one in the server's config (`tool_timeout_sec` for Codex), 120 seconds without one, or the `timeout` attribute of the tag, up to 600 seconds.
+
+The hidden prompt also tells the model where its own config lives on your machine: the user folder, its `AGENTS.md`, `mcp.json`, and the Claude Code and Codex files, with the format of an entry. So you can ask the chat to add an MCP server or change an instruction, and it edits the right file with its normal tools (which ask for approval like any write). The change is picked up when you reload the page or change workspace. A helper is not told, since it cannot ask for approval.
+
+What is not supported: signing in to a server through a browser (OAuth), the old SSE transport, and anything a server asks of the client, such as sampling or roots. For an HTTP server that needs a token, put it in the headers, as `bearer_token_env_var` or `http_headers` in Codex or `headers` in Claude Code.
 
 ### Update notice
 
@@ -199,6 +223,7 @@ Read this before you use Full access.
 - `AGENTS.md` and `CLAUDE.md` in a folder you pick are given to the model as instructions from you, without asking. A repository you downloaded can contain text meant to steer the model into running commands. Pick only folders you trust, and keep Read Only or Workspace Write for anything else. `/status` shows which files were read.
 - The side terminal runs what you type with your own rights, without asking: it is you typing. Pasting a command from a web page into it is as dangerous as in any terminal. Only your own keys and clicks work in it: a script on the page cannot type into it.
 - Everything a tool reads and everything a command prints is sent to DeepSeek's servers, secrets included. `glob` and `grep` skip common secret files. `shell` and an approved `read` do not.
+- MCP servers run with your rights, started by the host from your own config files, and whatever one returns is sent to DeepSeek too. The tokens in those files stay on your machine: the model is shown the names of the tools, never the config. Approve a call only after reading its arguments, and remember that what a server returns can contain instructions meant to steer the model.
 
 ## How it works
 
@@ -227,6 +252,9 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `host/host.js` | Runs commands and tools, streams output, enforces timeouts and kills |
 | `host/tools.js` | The `read`, `write`, `edit`, `glob` and `grep` tools |
 | `host/instructions.js` | Finds the `AGENTS.md` and `CLAUDE.md` files for the working folder |
+| `host/mcp-config.js` | Reads the MCP servers set up for Claude Code (`~/.claude.json`), Codex (`~/.codex/config.toml`) and `~/.dsx/mcp.json` |
+| `host/mcp.js` | The MCP client: starts the servers (stdio or streamable HTTP), lists their tools and calls them |
+| `host/toml.js` | A small TOML reader for Codex's config |
 | `host/pick-folder.ps1` | The folder dialog on Windows |
 | `host/install.js` | Registers and removes the native host when installing from source |
 | `installer/` | The Windows setup, the Firefox package, and the build and release scripts |
