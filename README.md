@@ -72,7 +72,7 @@ All controls sit in the composer of the DeepSeek page. The extension has no tool
 - **Default workspace**, above the composer, is the working directory. Its menu lists the folders you used before; "Add workspace..." opens your system's folder dialog.
 - The paperclip opens DeepSeek's own file dialog.
 - The permission button (**Read Only**, **Workspace Write**, **Full access**) opens a menu of presets. A short pixel wave crosses the composer when you change it.
-- The model button opens a small panel. The model is fixed. **Effort** is on or off and works exactly like DeepSeek's DeepThink button, which the extension hides and drives for you. Search is always on, and its button is hidden too. "Enable agent teamwork" is not built yet and cannot be clicked.
+- The model button opens a small panel. The model is fixed. **Effort** is on or off and works exactly like DeepSeek's DeepThink button, which the extension hides and drives for you. Search is always on, and its button is hidden too.
 - "Thought for N seconds" blocks are kept collapsed. Click one to read it, and it stays open. To stop this, run `chrome.storage.local.set({ collapseThinking: false })` in the extension's service worker console.
 - The model panel (click the model name above the send button) has a Context row: the tokens the chat has used against the model's 1M-token window, like `212K / 1M`, with a thin bar that turns amber and then red as it fills. It updates at the end of every reply, with the total DeepSeek counts.
 - Each thinking block shows how many tokens the model spent reasoning, counted live as it streams (`1.2K tokens`). DeepSeek sends the reasoning one token per chunk, so the count is exact; blocks from an earlier visit show none.

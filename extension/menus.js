@@ -45,13 +45,6 @@
     .bar.full i { background: var(--dsw-alias-state-error-primary, #f25a5a); }
     .item.static { cursor: default; }
     .item.static:hover { background: none; }
-    .item.disabled { cursor: not-allowed; }
-    .item.disabled:hover { background: none; }
-    .item.disabled .label { opacity: .55; }
-    .info { display: inline-flex; color: var(--dsw-alias-label-tertiary, #adb2b8); cursor: help; outline: none; margin-left: -4px; }
-    .info:focus-visible { box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); border-radius: 50%; }
-    .switch { flex: none; position: relative; width: 34px; height: 20px; margin-left: auto; border-radius: 10px; background: var(--dsw-alias-label-caption, #81858c); opacity: .35; }
-    .switch i { position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--dsw-alias-label-primary, #f9fafb); }
     .sep { height: 1px; margin: 4px 6px; background: var(--dsw-alias-border-l2, rgba(255, 255, 255, .12)); }
     .search {
       display: block; width: 100%; padding: 8px 10px; border: 0; outline: 0; background: none; color: inherit;
@@ -351,22 +344,7 @@
         pick: () => { active.view = 'effort'; active.selected = getState().thinking ? 1 : 2; render(); },
       });
 
-      // Agent teamwork is not built yet. The row is inert, and its (i) says so.
-      const teamwork = el('div', 'item disabled');
-      teamwork.setAttribute('role', 'menuitem');
-      teamwork.setAttribute('aria-disabled', 'true');
-      const teamworkLabel = el('span', 'label', 'Enable agent teamwork');
-      const info = el('span', 'info');
-      info.tabIndex = 0;
-      info.setAttribute('aria-label', 'Work in progress');
-      info.append(svgNode('info'));
-      tooltip.bind(info, () => 'Work in progress');
-      const toggle = el('span', 'switch');
-      toggle.append(document.createElement('i'));
-      teamwork.append(teamworkLabel, info, toggle);
-      // The label dims on its own, not the (i), which has to stay readable for its tooltip.
-
-      panel.replaceChildren(modelRow, contextRow, ...(known ? [bar] : []), effortRow, teamwork);
+      panel.replaceChildren(modelRow, contextRow, ...(known ? [bar] : []), effortRow);
     }
 
     function render() {

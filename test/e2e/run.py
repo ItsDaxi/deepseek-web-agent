@@ -550,7 +550,7 @@ def run(context, server):
     check("our attach button opens DeepSeek's own", wait_until(lambda: page.evaluate("window.__attachClicks || 0") == 1, message="attach click"))
 
     shadow.click_last("model-menu")
-    check("the model panel shows the model, effort and teamwork", wait_until(lambda: all(text in shadow.text() for text in ("Model", "Effort", "Enable agent teamwork")) and shadow.actions("effort-row"), message="model panel"))
+    check("the model panel shows the model and the effort", wait_until(lambda: all(text in shadow.text() for text in ("Model", "Effort")) and shadow.actions("effort-row"), message="model panel"))
     if SCREENSHOTS:
         page.screenshot(path=str(SCREENSHOTS / "7f-model-panel.png"))
     check("the model cannot be changed", not shadow.actions("model-row") and "DeepSeek-V4.1-Flash" in shadow.text())
