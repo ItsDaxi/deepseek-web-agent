@@ -11,6 +11,7 @@ const vm = require('node:vm');
 const Protocol = require('../../extension/lib/protocol.js');
 const Filter = require('../../extension/lib/stream-filter.js');
 const ContextUsage = require('../../extension/lib/context-usage.js');
+const ChipHider = require('../../extension/lib/chip-hider.js');
 
 const SOURCE = fs.readFileSync(path.join(__dirname, '..', '..', 'extension', 'page-hook.js'), 'utf8');
 const SESSION = '11111111-2222-3333-4444-555555555555';
@@ -187,6 +188,7 @@ function createPage({ parseStatus = 'SUCCESS', blockSendUntilParsed = true, noUp
   sandbox.DsxProtocol = Protocol;
   sandbox.DsxStreamFilter = Filter;
   sandbox.DsxContextUsage = ContextUsage;
+  sandbox.DsxChipHider = ChipHider;
   // Stands for the page's own fetch, which the hook wraps.
   sandbox.fetch = async () => ({ status: 200, clone: () => ({ json: async () => ({}) }) });
 

@@ -6,6 +6,7 @@
   const Protocol = window.DsxProtocol;
   const Filter = window.DsxStreamFilter;
   const ContextUsage = window.DsxContextUsage;
+  const ChipHider = window.DsxChipHider;
 
   const STREAM_PATHS = [
     '/api/v0/chat/completion',
@@ -553,6 +554,10 @@
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  // How long after a message is sent the page is given to clear the files from its composer.
+  const CHIP_RELEASE_MS = 2500;
+  const chipHider = ChipHider.createChipHider({ getArea: findComposer });
+
   async function sendThroughComposer(entry) {
     const deadline = Date.now() + SEND_TIMEOUT_MS;
     const marker = `${Protocol.RESULT_MARKER_PREFIX}${entry.key}`;
@@ -632,7 +637,12 @@
         const [entry] = resultQueue.splice(index, 1);
         // Files the model asked to read go into the composer first, so the message that carries the result takes
         // them along. When they cannot be attached the model is told, and the result goes out without them.
+        // The page draws them in the composer as if the user had attached them, which is kept out of sight.
+        let withFiles = false;
         if (entry.files && entry.files.length) {
+          withFiles = true;
+          chipHider.start(entry.files.map((file) => file.name));
+          post({ type: 'attachment-state', ids: entry.ids, state: 'attaching' });
           const attached = await attachFiles(entry.files);
           entry.files = null;
           if (!attached.ok && pendingResults.has(entry.key)) {
@@ -641,6 +651,10 @@
         }
         if (config.agent) lastSent = { key: entry.key, ids: entry.ids, sessionId: entry.sessionId, body: pendingResults.get(entry.key) };
         const sent = await sendThroughComposer(entry);
+        if (withFiles) {
+          chipHider.releaseSoon(CHIP_RELEASE_MS);
+          post({ type: 'attachment-state', ids: entry.ids, state: 'done' });
+        }
         if (!sent) {
           pendingResults.delete(entry.key);
           for (const id of entry.ids) post({ type: 'result-failed', id });

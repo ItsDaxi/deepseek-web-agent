@@ -11,6 +11,7 @@ const vm = require('node:vm');
 const Protocol = require('../../extension/lib/protocol.js');
 const Filter = require('../../extension/lib/stream-filter.js');
 const ContextUsage = require('../../extension/lib/context-usage.js');
+const ChipHider = require('../../extension/lib/chip-hider.js');
 
 const SOURCE = fs.readFileSync(path.join(__dirname, '..', '..', 'extension', 'page-hook.js'), 'utf8');
 const A = '11111111-1111-4111-8111-111111111111';
@@ -65,6 +66,7 @@ function createPage({ token = null, answer = { status: 200, body: { code: 0, dat
   sandbox.DsxProtocol = Protocol;
   sandbox.DsxStreamFilter = Filter;
   sandbox.DsxContextUsage = ContextUsage;
+  sandbox.DsxChipHider = ChipHider;
   vm.createContext(sandbox);
   const pageWindow = vm.runInContext('globalThis', sandbox);
   vm.runInContext(SOURCE, sandbox);

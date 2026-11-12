@@ -361,7 +361,7 @@
           { className: 'meta' },
           ...outcome.meta,
           tool.autoRun ? el('span', { text: 'auto' }) : null,
-          tool.durationMs ? el('span', { text: formatDuration(tool.durationMs) }) : null,
+          tool.attaching ? el('span', { text: 'attaching…' }) : tool.durationMs ? el('span', { text: formatDuration(tool.durationMs) }) : null,
           tool.expanded ? copy : null,
           icon(tool.expanded ? 'chevronDown' : 'chevronRight'),
         ),

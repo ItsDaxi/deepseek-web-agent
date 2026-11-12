@@ -1170,6 +1170,10 @@
           renderStats();
         }
         break;
+      case 'attachment-state':
+        // The file goes to the chat after the tool has finished, which can take a few seconds. The card says so.
+        for (const id of message.ids || []) if (store.get(id)) store.set(id, { attaching: message.state === 'attaching' });
+        break;
       case 'chats-deleted':
         finishDelete(message);
         break;

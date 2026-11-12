@@ -113,6 +113,7 @@ The model can look at files that are not text, on your computer: images (`png`, 
 
 `read` cannot print such a file, so the host sends its bytes to the page, and the page takes them as if you had picked the file with the paperclip. DeepSeek uploads and parses it, and the message that carries the result of the call goes out with the file attached. What the model gets is what DeepSeek makes of the file: the text of a PDF or an Office document, and the text it recognises in an image. This extension does not read the files itself, and a picture's contents that DeepSeek's chat does not describe do not reach the model.
 
+- The page draws the file in the composer as if you had attached it, and the extension keeps that out of sight: you see only the tool card, which says `attaching…` until DeepSeek has the file, and the message goes out by itself after that. If the page ever lays the composer out in a way the extension does not recognise, the file just shows there as a normal attachment. Do not type in the composer while it is attaching.
 - The call is approved like any other `read`: it runs by itself inside the workspace and asks first anywhere else. The card says which file it is.
 - A file can be at most 20 MB, and one message carries at most 10 files. DeepSeek has limits of its own too, and when it refuses a file (too long, empty, unreadable) the model is told why and carries on without it.
 - A message that carries a file keeps the page's own search setting instead of forcing search on, because DeepSeek does not allow both together for some models.
@@ -276,6 +277,7 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/lib/protocol.js` | The hidden prompt, the tool syntax and the format of result messages |
 | `extension/lib/stream-filter.js` | Removes tool syntax from the response stream and from the history |
 | `extension/lib/chat-stats.js` | The figures of the stats line under the composer: turns, steps, time, speed and tokens |
+| `extension/lib/chip-hider.js` | Keeps the thumbnail of a file the model read out of the composer |
 | `extension/lib/todo.js` | Reads the model's task list and says how far it is |
 | `extension/lib/projects.js` | Ties each chat to its folder and groups the chats into projects |
 | `extension/lib/context-usage.js` | Reads the token total DeepSeek counts for a chat, and the model's token limit, for the Context row of the model panel |
