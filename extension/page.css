@@ -67,3 +67,14 @@ html[data-dsx-terminal] body:not(:has(> #root)) {
 [data-dsx-hidden] {
   display: none !important;
 }
+
+/* The chats that belong to a project are shown in the project's own section at the top of the sidebar
+   (sidebar-projects.js marks them), so they leave DeepSeek's list. A group of that list that has nothing left
+   in it, such as "Today" with only project chats, goes too. */
+a[data-dsx-in-project] {
+  display: none !important;
+}
+
+*:has(> a[data-dsx-in-project]):not(:has(> a[href*="/a/chat/s/"]:not([data-dsx-in-project]))) {
+  display: none !important;
+}

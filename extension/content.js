@@ -11,13 +11,17 @@
   const { modeLabel } = globalThis.DsxMenus;
   const { createChatStats, formatStats } = globalThis.DsxChatStats;
   const { createTerminal } = globalThis.DsxTerminal;
+  const { createSidebarProjects } = globalThis.DsxSidebarProjects;
+  const Projects = globalThis.DsxProjects;
 
   // mode is the permission preset: 'plan' (Plan Mode), 'ask' (Read Only), 'workspace' (Workspace Write) or
   // 'bypass' (Full access). planReturnMode is the preset that was on before plan mode, which /plan goes back to.
   // workspaces are the folders the user chose before, listed in the workspace menu; cwd is the current one.
   // thinking is the Effort switch, which drives DeepSeek's DeepThink. Search is always on.
   // dismissedUpdate is the release tag whose notice the user closed.
-  const DEFAULT_SETTINGS = { mode: 'ask', planReturnMode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', terminalOpen: false, terminalWidth: 440, helperRetryMs: 0 };
+  // projectChats ties each chat to the folder it was started in (lib/projects.js), and projectsFolded holds the
+  // folders whose group is closed in the sidebar, and projectsOrder the folders in the order the user dragged them to.
+  const DEFAULT_SETTINGS = { mode: 'ask', planReturnMode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', terminalOpen: false, terminalWidth: 440, helperRetryMs: 0, projectChats: {}, projectsFolded: {}, projectsOrder: [] };
   const MAX_WORKSPACES = 8;
   // Used only when the model leaves out the timeout it is asked to choose.
   const FALLBACK_TIMEOUT_SECONDS = 120;
@@ -94,6 +98,8 @@
   }
 
   let settings = { ...DEFAULT_SETTINGS };
+  // False until the stored settings have been read, so a chat is not judged against the defaults.
+  let settingsReady = false;
   let hostInfo = null;
   let hostError = null;
   // The newer release the background script found, or null.
@@ -235,8 +241,11 @@
 
   chrome.storage.local.get(DEFAULT_SETTINGS).then((stored) => {
     settings = stored;
+    settingsReady = true;
     pushConfig();
     renderControls();
+    followChatFolder();
+    renderProjects();
     thinkCollapser.scan();
     // The terminal comes back as the user left it.
     if (settings.terminalOpen) terminal.open(settings.terminalWidth);
@@ -254,6 +263,7 @@
     pushConfig();
     renderControls();
     thinkCollapser.scan();
+    if (changes.projectChats || changes.projectsFolded || changes.projectsOrder) renderProjects();
   });
 
   // ---- Background connection -----------------------------------------------------------------
@@ -1116,6 +1126,10 @@
         autoTurns = 0;
         turn = null;
         chatStats.userTurn(message.sessionId, message.first === true);
+        // The chat belongs to the folder that is selected when its first message is sent.
+        if (!helper && settings.cwd) {
+          updateProjectChats((chats) => Projects.touchChat(chats, { sessionId: message.sessionId, path: settings.cwd, at: Date.now() }));
+        }
         break;
       case 'stream-start':
         chatStats.streamStart(message.sessionId, message.at);
@@ -1155,6 +1169,9 @@
           renderContext();
           renderStats();
         }
+        break;
+      case 'chats-deleted':
+        finishDelete(message);
         break;
       case 'think-tokens':
         thinkCounter.update(message);
@@ -1232,13 +1249,18 @@
   // the page's own list changes the DOM all the way while it is scrolled.
   new MutationObserver((records) => {
     const roots = new Set();
+    let sidebarChanged = false;
     for (const record of records) {
       const nodes = record.type === 'childList' ? record.addedNodes : [record.target];
       for (const node of nodes) {
         const element = node.nodeType === 1 ? node : node.parentElement;
         if (element) roots.add(element);
+        // A chat link that has just been drawn is hidden in the same pass if it belongs to a project.
+        if (!sidebarChanged && record.type === 'childList' && node.nodeType === 1 && (node.matches(CHAT_LINK) || node.querySelector(CHAT_LINK))) sidebarChanged = true;
       }
     }
+    followChatFolder();
+    scheduleProjects(sidebarChanged);
     for (const root of roots) {
       decorateCodeBlocks(root);
       hideResultMessages(root);
@@ -1339,6 +1361,137 @@
     onClearAgents: () => { if (port) port.postMessage({ type: 'agent-clear' }); },
     // The way back from a helper's tab, or from the chat of a helper that ended, to the main chat.
     onBack: () => { if (port) port.postMessage({ type: 'agent-back' }); },
+  });
+
+  // ---- Projects --------------------------------------------------------------------------------
+  // The sidebar groups the chats by the folder they were started in. A folder shows up as a project once a chat
+  // has been sent from it, and its "+" starts a new chat there. Opening a chat of a project selects its folder,
+  // so the tools of that chat work where the chat belongs.
+  const CHAT_LINK = 'a[href*="/a/chat/s/"]';
+  const PROJECTS_THROTTLE_MS = 250;
+  let projectsTimer = 0;
+  let projectsAt = 0;
+  let followedChat;
+
+  // Read, change, write: another tab may have changed the list since this one last looked.
+  function updateProjectChats(change) {
+    try {
+      chrome.storage.local.get({ projectChats: {} }).then(({ projectChats }) => {
+        const current = projectChats && typeof projectChats === 'object' ? projectChats : {};
+        const next = change(current);
+        if (next !== current) chrome.storage.local.set({ projectChats: next });
+      });
+    } catch {
+      // The extension was reloaded; the pill already asks for a page reload.
+    }
+  }
+
+  function currentChatId() {
+    const match = SESSION_IN_PATH.exec(location.pathname);
+    return match ? match[0].toLowerCase() : null;
+  }
+
+  function renderProjects() {
+    if (helper || !settingsReady) return;
+    projectsAt = Date.now();
+    const chats = settings.projectChats || {};
+    const titles = sidebarProjects.sync({ groups: Projects.groupProjects(chats, settings.projectsOrder), folded: settings.projectsFolded || {}, currentId: currentChatId() });
+    // The title DeepSeek gives a chat arrives after its first answer, so it is copied once it shows up.
+    const changed = Object.entries(titles).some(([id, title]) => Projects.setTitle(chats, id, title) !== chats);
+    if (changed) updateProjectChats((stored) => Object.entries(titles).reduce((all, [id, title]) => Projects.setTitle(all, id, title), stored));
+  }
+
+  // The page changes all the time while a reply streams in, so the section is drawn at most a few times a
+  // second, unless chats were just added to the sidebar, which must be hidden at once or they flash.
+  function scheduleProjects(now) {
+    if (helper || !settingsReady) return;
+    if (now) {
+      renderProjects();
+      return;
+    }
+    if (projectsTimer) return;
+    const wait = Math.max(0, projectsAt + PROJECTS_THROTTLE_MS - Date.now());
+    projectsTimer = setTimeout(() => {
+      projectsTimer = 0;
+      renderProjects();
+    }, wait);
+  }
+
+  // Opening a chat of a project selects its folder. Only a change of chat does it, so a folder picked on
+  // purpose while a chat is open stays.
+  function followChatFolder() {
+    if (helper || !settingsReady) return;
+    const id = currentChatId();
+    if (id === followedChat) return;
+    followedChat = id;
+    const path = id ? Projects.pathOf(settings.projectChats || {}, id) : null;
+    if (path && !Projects.samePath(path, settings.cwd)) saveSettings({ cwd: path });
+  }
+
+  function findNewChatButton() {
+    const label = [...document.querySelectorAll('span')].find((node) => /^(new chat|nuova chat)$/i.test((node.textContent || '').trim()));
+    return label ? label.closest('[tabindex]') || label.parentElement : null;
+  }
+
+  // The "+" of a project: the folder becomes the workspace and a new chat opens.
+  function startChatIn(path) {
+    if (!path) return;
+    const known = (settings.workspaces || []).some((saved) => Projects.samePath(saved, path));
+    saveSettings({ cwd: path, ...(known ? {} : { workspaces: [path, ...(settings.workspaces || [])].slice(0, MAX_WORKSPACES) }) });
+    // A new chat has no id in its address: the one that is open already is a new chat.
+    if (!currentChatId()) return;
+    const button = findNewChatButton();
+    if (button) {
+      button.click();
+      setTimeout(() => { if (currentChatId()) location.assign('/'); }, 800);
+    } else {
+      location.assign('/');
+    }
+  }
+
+  function openProjectChat(id) {
+    const link = sidebarProjects.anchorOf(id);
+    if (link) link.click();
+    else location.assign(`/a/chat/s/${id}`);
+  }
+
+  // Deleting asks the page to repeat DeepSeek's own delete call, and waits for its answer. When it worked the
+  // chats leave the projects, and if one of them is the chat on screen the page goes to a new chat.
+  const DELETE_WAIT_MS = 25000;
+  const deleteRequests = new Map();
+
+  function deleteChats(ids) {
+    return new Promise((resolve) => {
+      const id = `delete-${Date.now()}-${deleteRequests.size}`;
+      const timer = setTimeout(() => {
+        deleteRequests.delete(id);
+        resolve({ ok: false, error: 'timed out' });
+      }, DELETE_WAIT_MS);
+      deleteRequests.set(id, { ids, resolve, timer });
+      postToPage({ type: 'delete-chats', id, ids });
+    });
+  }
+
+  function finishDelete(message) {
+    const request = deleteRequests.get(message.id);
+    if (!request) return;
+    deleteRequests.delete(message.id);
+    clearTimeout(request.timer);
+    if (message.ok) {
+      updateProjectChats((chats) => Projects.removeChats(chats, request.ids));
+      if (request.ids.includes(currentChatId())) setTimeout(() => location.assign('/'), 300);
+    }
+    request.resolve({ ok: message.ok === true, error: message.error });
+  }
+
+  const sidebarProjects = createSidebarProjects({
+    sessionOf: Projects.sessionOf,
+    onOpenChat: openProjectChat,
+    onNewChat: startChatIn,
+    onRemoveChat: (id) => updateProjectChats((chats) => Projects.removeChat(chats, id)),
+    onDelete: deleteChats,
+    onReorder: (order) => saveSettings({ projectsOrder: order }),
+    onToggleFold: (path) => saveSettings({ projectsFolded: { ...(settings.projectsFolded || {}), [path]: !(settings.projectsFolded || {})[path] } }),
   });
 
   // ---- Agents menu -----------------------------------------------------------------------------

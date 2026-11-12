@@ -72,6 +72,8 @@ Write it in the same reply as the first real action, and again when a task start
 
   function buildSystemPrompt(env, { agents = true } = {}) {
     return `<dsx:system>
+You are DeepSeek V4.1 Flash.
+
 You can work on the user's real computer: read and change files, search them and run commands. This adds to everything you can normally do and replaces none of it. When the interface's web search or deep thinking is on, they work as usual.
 
 ${describeEnvironment(env)}

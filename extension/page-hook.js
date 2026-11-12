@@ -59,6 +59,62 @@
     window.postMessage({ source: 'dsx-page', ...message }, location.origin);
   }
 
+  // ---- Deleting chats ------------------------------------------------------------------------
+  // The sidebar of the extension can delete chats. DeepSeek's own call is repeated, with the headers the page
+  // sends on every API call (the sign-in among them), so it is the same request as the one its own menu makes.
+  const DELETE_PATH = '/api/v0/chat_session/delete';
+  const DELETE_TIMEOUT_MS = 20000;
+  // What the page sends once for a single call and must not be reused: the proof of work of a reply, and the
+  // framing of the body.
+  const NOT_REUSED = /^(content-|x-ds-pow|accept-encoding$)/i;
+  const apiCalls = new WeakSet();
+  const apiHeaders = {};
+
+  function rememberHeader(name, value) {
+    if (!NOT_REUSED.test(name)) apiHeaders[String(name).toLowerCase()] = String(value);
+  }
+
+  // The sign-in, if the page has not made a call yet: its token is kept in the page's storage.
+  function storedToken() {
+    try {
+      const stored = JSON.parse(localStorage.getItem('userToken') || 'null');
+      return stored && typeof stored.value === 'string' ? stored.value : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function deleteChats(id, ids) {
+    const headers = { ...apiHeaders };
+    if (!headers.authorization) {
+      const token = storedToken();
+      if (token) headers.authorization = `Bearer ${token}`;
+    }
+    const finish = (ok, error) => post({ type: 'chats-deleted', id, ok, error: error || '' });
+    if (!headers.authorization) {
+      finish(false, 'not signed in');
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    nativeOpen.call(xhr, 'POST', DELETE_PATH, true);
+    for (const [name, value] of Object.entries(headers)) nativeSetHeader.call(xhr, name, value);
+    nativeSetHeader.call(xhr, 'content-type', 'application/json');
+    xhr.timeout = DELETE_TIMEOUT_MS;
+    xhr.onload = () => {
+      try {
+        const payload = JSON.parse(nativeResponseText.call(xhr));
+        const code = payload && payload.data && payload.data.biz_code !== undefined ? payload.data.biz_code : payload && payload.code;
+        if (xhr.status === 200 && payload && payload.code === 0 && code === 0) finish(true);
+        else finish(false, `DeepSeek answered ${xhr.status}, code ${code === undefined ? '?' : code}`);
+      } catch {
+        finish(false, `DeepSeek answered ${xhr.status}`);
+      }
+    };
+    xhr.onerror = () => finish(false, 'no connection');
+    xhr.ontimeout = () => finish(false, 'timed out');
+    nativeSend.call(xhr, JSON.stringify({ chat_session_ids: ids }));
+  }
+
   function parseUrl(url) {
     try {
       return new URL(url, location.href);
@@ -145,6 +201,8 @@
     const parsed = parseUrl(url);
     let target = url;
     requests.delete(this);
+    apiCalls.delete(this);
+    if (parsed && parsed.origin === location.origin && parsed.pathname.startsWith('/api/v0/')) apiCalls.add(this);
     if (parsed && parsed.origin === location.origin) {
       if (parsed.pathname === HISTORY_PATH) {
         target = withoutHistoryCache(parsed);
@@ -165,6 +223,7 @@
   proto.setRequestHeader = function (name, value) {
     const request = requests.get(this);
     if (request && request.kind === 'stream') request.headers[name] = value;
+    if (apiCalls.has(this)) rememberHeader(name, value);
     return nativeSetHeader.call(this, name, value);
   };
 
@@ -618,6 +677,10 @@
       sendText(Protocol.buildHelperTask(message.task)).then((sent) => {
         if (!sent) post({ type: 'prompt-failed' });
       });
+    } else if (message.type === 'delete-chats') {
+      const ids = Array.isArray(message.ids) ? message.ids.filter((value) => typeof value === 'string' && /^[0-9a-f-]{36}$/i.test(value)) : [];
+      if (ids.length) deleteChats(message.id, ids);
+      else post({ type: 'chats-deleted', id: message.id, ok: false, error: 'no chat' });
     } else if (message.type === 'resend-last') {
       // A result DeepSeek refused is sent again. The opening task is not: its chat has to start over.
       if (lastSent && lastSent.key && lastSent.body) {

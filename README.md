@@ -143,6 +143,18 @@ For work that takes three steps or more, the model keeps a task list, as the oth
 - A list holds at most 30 tasks, each cut at 200 characters. An empty one clears it.
 - It also works in plan mode. A helper has no list, since nobody would see it.
 
+### Projects
+
+The sidebar groups your chats by the folder they were started in, as the desktop coding apps do. Nothing to set up: a folder becomes a **project** the first time you send a message from it, named after the folder.
+
+- A chat belongs to the workspace that was selected when its first message was sent. Its project shows at the top of the sidebar, with the newest chats first (six at first, then `Show all`), and the chat leaves DeepSeek's own list below. Click a project's name to fold it.
+- The **+** that shows when you hover a project's name selects that folder as the workspace and opens a new chat.
+- Opening a chat of a project selects its folder, so its commands run where it belongs. Picking another folder while the chat is open is left as you picked it.
+- **Right click** on a chat opens a menu to delete that chat, or every chat of its project; right click on a project's name offers `New chat` and `Delete all chats`. Deleting asks first and cannot be undone: it sends DeepSeek's own delete call, so the chats are gone from your account, not only from the sidebar. The folder on your disk is not touched. If the chat on screen is deleted, the page goes to a new chat.
+- **Drag a project by its name** to move it, with all its chats, to another place in the list. A chat cannot be moved to another project on its own. The order you leave is kept; a project that is new goes on top.
+- Chats you had before have no folder and stay in DeepSeek's list. Send a message in one with a workspace selected and it joins that project. The **x** on a chat in a project takes it out again.
+- Two folders with the same name show the folder that holds them, such as `app · work` and `app · play`. Titles are the ones DeepSeek gives the chats. The chat's tie to its folder is kept in the browser's extension storage, not on DeepSeek's side, so it stays on this browser. Helpers' chats are not added.
+
 ### Instruction files
 
 The extension reads `AGENTS.md` and `CLAUDE.md`, the files other coding agents use for standing instructions, and gives them to the model in the hidden prompt.
@@ -265,14 +277,16 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/lib/stream-filter.js` | Removes tool syntax from the response stream and from the history |
 | `extension/lib/chat-stats.js` | The figures of the stats line under the composer: turns, steps, time, speed and tokens |
 | `extension/lib/todo.js` | Reads the model's task list and says how far it is |
+| `extension/lib/projects.js` | Ties each chat to its folder and groups the chats into projects |
 | `extension/lib/context-usage.js` | Reads the token total DeepSeek counts for a chat, and the model's token limit, for the Context row of the model panel |
-| `extension/page-hook.js` | Wraps `XMLHttpRequest`, sends results through the page's own composer, and puts the files `read` attached into the page's file input |
+| `extension/page-hook.js` | Wraps `XMLHttpRequest`, sends results through the page's own composer, puts the files `read` attached into the page's file input, and repeats DeepSeek's call that deletes chats |
 | `extension/content.js` | Approval decisions, the life of each command, and changes to the page |
 | `extension/cards.js` | Draws the tool cards |
 | `extension/terminal.js` | The side terminal panel |
 | `extension/lib/terminal-core.js` | What a lone `cd` means, the prompt and the history of the side terminal |
 | `extension/page-controls.js` | The status pill, the composer buttons, tooltips and the mode animation |
 | `extension/menus.js` | The workspace, permission and model menus |
+| `extension/sidebar-projects.js` | The projects section at the top of DeepSeek's sidebar |
 | `extension/think-collapse.js` | Keeps the thinking blocks collapsed |
 | `extension/think-tokens.js` | Shows the reasoning token count in each thinking block |
 | `extension/background.js` | Connects tabs to the native host |
