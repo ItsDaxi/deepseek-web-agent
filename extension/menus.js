@@ -7,8 +7,9 @@
 
   const MODEL_NAME = 'DeepSeek-V4.1-Flash';
   // The presets, from the safest to the most open. The ids are what is stored in settings.mode:
-  // 'ask' is the original manual mode, and 'bypass' the original bypass mode.
+  // 'ask' is the original manual mode, and 'bypass' the original bypass mode. 'plan' looks and plans only.
   const MODES = [
+    { id: 'plan', label: 'Plan Mode' },
     { id: 'ask', label: 'Read Only' },
     { id: 'workspace', label: 'Workspace Write' },
     { id: 'bypass', label: 'Full access' },

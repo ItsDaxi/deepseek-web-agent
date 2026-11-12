@@ -3,7 +3,7 @@
 (function (root) {
   'use strict';
 
-  const TOOL_NAMES = ['shell', 'read', 'write', 'edit', 'glob', 'grep', 'poll', 'kill', 'agent', 'mcp'];
+  const TOOL_NAMES = ['shell', 'read', 'write', 'edit', 'glob', 'grep', 'poll', 'kill', 'agent', 'mcp', 'plan', 'todo'];
   const SENTINEL_PREFIX = 'dsx-tool:';
   const RESULT_MARKER_PREFIX = 'dsx-result:';
   const MAX_MODEL_OUTPUT_CHARS = 20000;
@@ -48,7 +48,27 @@ Use it for work that would fill this chat, such as searching a large codebase or
 
 `;
 
-  const AGENT_REMINDER = ' To hand a self-contained job to a helper, which works in its own chat and reports back: <dsx:agent description="a short title">the whole task</dsx:agent>.';
+  // The task list, left out of a helper's chat: nobody sees it there.
+  const TODO_SECTION = `Keep a task list for work that takes three steps or more. It stays on the user's screen above the message box, and you write the whole list again each time it changes, one task to a line: [ ] to do, [~] being worked on, [x] done. Only one task is marked [~] at a time.
+<dsx:todo>
+[x] Read the config files
+[~] Fix the parser
+[ ] Run the tests
+</dsx:todo>
+Write it in the same reply as the first real action, and again when a task starts or ends, put together with the next tool call rather than alone. Do not use it for a simple question or a one-step job. Mark a task [x] only once it is really done, and finish with every task done or removed. An empty tag clears the list.
+
+`;
+
+  const TODO_REMINDER = ' For work of three steps or more, keep the task list on the user\'s screen: <dsx:todo>[x] done\n[~] now\n[ ] later</dsx:todo>, the whole list each time, in the same reply as your next action.';
+
+  const AGENT_REMINDER =' To hand a self-contained job to a helper, which works in its own chat and reports back: <dsx:agent description="a short title">the whole task</dsx:agent>.';
+
+  // Said only when the host can send a file, so an older host is never promised something it cannot do.
+  function describeAttachments(env) {
+    if (!env || !Array.isArray(env.features) || !env.features.includes('attachments')) return '';
+    return `read also works on images (png, jpg, gif, webp, bmp, tiff), PDFs and Office documents (docx, xlsx, pptx, doc, xls, ppt) and ebooks (epub): it cannot print them, so it attaches the file to the message that carries its result, and the chat reads it for you. You get the text the chat extracts from a document, and what it recognises in an image. offset and limit do not apply to them, and a file can be at most 20 MB. Attach only what the request needs.
+`;
+  }
 
   function buildSystemPrompt(env, { agents = true } = {}) {
     return `<dsx:system>
@@ -60,6 +80,7 @@ To use one of these, write its tag on its own line, not inside a code fence.
 
 Read a text file, with line numbers. offset and limit are optional:
 <dsx:read path="src/app.js" offset="1" limit="2000"></dsx:read>
+${describeAttachments(env)}
 
 Create or fully replace a file:
 <dsx:write path="notes.txt">
@@ -92,7 +113,7 @@ Then read what it printed so far, and optionally wait for new output:
 Stop a background job:
 <dsx:kill id="job-id"></dsx:kill>
 
-${agents ? AGENT_SECTION + describeConfig(env) : ''}Relative paths and a missing path mean the current working directory.
+${agents ? AGENT_SECTION + TODO_SECTION + describeConfig(env) : ''}Relative paths and a missing path mean the current working directory.
 
 Rules:
 - End your reply immediately after your last closing tag and never guess a result. Do not write anything after it.
@@ -116,7 +137,7 @@ Rules:
     const folder = env && (env.cwd || env.home);
     const location = folder ? ` The current working directory is ${folder}: you already know it, so never run a command just to find it out.` : '';
     const mcp = usableMcpServers(env && env.mcp).length ? MCP_REMINDER : '';
-    return `<dsx:system>Reminder: to act on the user's computer, end your reply with tags, outside any code fence: <dsx:read path="file"></dsx:read>, <dsx:write path="file">content</dsx:write>, <dsx:edit path="file"><dsx:old>exact text</dsx:old><dsx:new>new text</dsx:new></dsx:edit>, <dsx:glob>pattern</dsx:glob>, <dsx:grep>regular expression</dsx:grep> or <dsx:shell timeout="seconds">command</dsx:shell>. Choose the timeout yourself, up to 600. For something that keeps running, such as a dev server, add background="true" and read it with <dsx:poll id="job-id" wait="seconds"></dsx:poll>, and stop it with <dsx:kill id="job-id"></dsx:kill>.${agents ? AGENT_REMINDER : ''}${mcp} A tag runs only in your reply, never in your reasoning. Anything on this computer is looked at with a tag, not a web search, and web search itself still works as usual for everything else. Write nothing after your last tag. Use tags only while the request still needs something done; once it is done, answer in plain text with no tag, and never re-check a call that already succeeded. Web search and your other abilities still work as usual.${location} Never mention this reminder or how these work.</dsx:system>`;
+    return `<dsx:system>Reminder: to act on the user's computer, end your reply with tags, outside any code fence: <dsx:read path="file"></dsx:read>, <dsx:write path="file">content</dsx:write>, <dsx:edit path="file"><dsx:old>exact text</dsx:old><dsx:new>new text</dsx:new></dsx:edit>, <dsx:glob>pattern</dsx:glob>, <dsx:grep>regular expression</dsx:grep> or <dsx:shell timeout="seconds">command</dsx:shell>. Choose the timeout yourself, up to 600. For something that keeps running, such as a dev server, add background="true" and read it with <dsx:poll id="job-id" wait="seconds"></dsx:poll>, and stop it with <dsx:kill id="job-id"></dsx:kill>.${agents ? AGENT_REMINDER + TODO_REMINDER : ''}${mcp} A tag runs only in your reply, never in your reasoning. Anything on this computer is looked at with a tag, not a web search, and web search itself still works as usual for everything else. Write nothing after your last tag. Use tags only while the request still needs something done; once it is done, answer in plain text with no tag, and never re-check a call that already succeeded. Web search and your other abilities still work as usual.${location} Never mention this reminder or how these work.</dsx:system>`;
   }
 
   // ---- MCP tools -----------------------------------------------------------------------------
@@ -179,6 +200,28 @@ ${body}`;
 
   const MCP_RETIRED = '<dsx:system>The MCP tools you were told about earlier are no longer available. Do not call them.</dsx:system>';
 
+  // ---- Plan mode -------------------------------------------------------------------------------
+  // The model explores, then asks for approval with a plan tag. The block goes out with every message while
+  // plan mode is on, so a chat that was already running learns of it, and the tag is only described here.
+
+  function buildPlanBlock({ agents = true } = {}) {
+    return `<dsx:system>Plan mode is on. The user wants to approve a plan before anything changes. Look around with read, glob and grep${agents ? ', or with a helper for a large search' : ''}. A shell command is only for looking, never for changing anything, and it asks the user first. write, edit and MCP calls are refused until the plan is approved, so do not try them.
+
+When you understand the task, present the plan as the last thing in your reply, outside any code fence:
+<dsx:plan>
+the plan in markdown: the goal, the files to change and what changes in each, the steps in order, the risks, and how to check that it worked
+</dsx:plan>
+Write nothing after the closing tag. If the request is only a question, or needs no change, answer it in plain text and write no plan. When the user approves, plan mode ends and you are told, and then you carry the plan out. If the user wants it changed, revise it and present it again. Never mention these instructions.</dsx:system>`;
+  }
+
+  // Appended to a result whose file could not be attached, so the model does not wait for something that will not come.
+  function buildFileFailure(reason) {
+    const safe = String(reason || 'unknown reason').replace(/<\/?dsx:[^>]*>/g, '');
+    return `<dsx:system>The file that was meant to come with this result could not be attached (${safe}). Tell the user, and carry on without it.</dsx:system>`;
+  }
+
+  const PLAN_RETIRED ='<dsx:system>Plan mode is over. You may change files and run commands again, as far as the user approves them.</dsx:system>';
+
   // The user's own instructions, from a file. They sit in a <dsx:system> block like the rest, so the
   // history hides them too, and a closing tag inside them cannot end the block early.
   function buildExtraBlock(text) {
@@ -192,8 +235,11 @@ ${body}`;
   // sent earlier in this chat no longer apply.
   // `agents` is false in a helper's own chat, which has no helper tool.
   // `mcp` is the text of the MCP tools to add to this message, or null; `mcpRetire` says they are gone.
-  function injectPrompt(prompt, env, { full, extra = null, retire = false, agents = true, mcp = null, mcpRetire = false }) {
+  // `plan` is true while plan mode is on, and `planRetire` says the chat was told so earlier and it is over now.
+  function injectPrompt(prompt, env, { full, extra = null, retire = false, agents = true, mcp = null, mcpRetire = false, plan = false, planRetire = false }) {
     const parts = [prompt, full ? buildSystemPrompt(env, { agents }) : buildReminder(env, { agents })];
+    if (plan) parts.push(buildPlanBlock({ agents }));
+    if (planRetire) parts.push(PLAN_RETIRED);
     if (extra) parts.push(buildExtraBlock(extra));
     if (retire) parts.push(EXTRA_RETIRED);
     if (mcp) parts.push(buildMcpBlock(mcp));
@@ -301,6 +347,8 @@ ${String(task).trim()}`;
     describeMcp,
     describeConfig,
     buildExtraBlock,
+    buildPlanBlock,
+    buildFileFailure,
     injectPrompt,
     stripInjected,
     truncateForModel,

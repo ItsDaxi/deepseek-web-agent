@@ -17,6 +17,7 @@ const VERSION = '0.1.0';
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
 const MAX_CHUNK_CHARS = 64 * 1024; // Chrome caps host-to-browser messages at 1 MB.
+const MAX_ATTACHMENT_PIECE_CHARS = 512 * 1024;
 const MAX_STREAMED_CHARS = 5 * 1024 * 1024;
 const FLUSH_INTERVAL_MS = 50;
 // Output a background job keeps for the next poll, so a noisy server cannot grow without bound.
@@ -409,6 +410,18 @@ function pickFolder({ id, start }) {
   });
 }
 
+// Sends a file the model asked to read as numbered pieces of base64, which the extension joins again. A piece
+// stays under the 1 MB the browser allows for one message, with room for the rest of the message.
+async function sendAttachment(id, { path: file, name, mime, size }) {
+  const data = (await fs.promises.readFile(file)).toString('base64');
+  const parts = Math.max(1, Math.ceil(data.length / MAX_ATTACHMENT_PIECE_CHARS));
+  for (let part = 0; part < parts; part += 1) {
+    send({ type: 'attachment', id, name, mime, size, part, parts, data: data.slice(part * MAX_ATTACHMENT_PIECE_CHARS, (part + 1) * MAX_ATTACHMENT_PIECE_CHARS) });
+    // Lets the pipe drain, so a large file does not sit in memory twice.
+    if (part % 8 === 7) await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 // Runs a file tool in a worker thread and reports it exactly like a shell command.
 function runFileTool(request) {
   const { id, timeoutMs } = request;
@@ -432,14 +445,30 @@ function runFileTool(request) {
     running.delete(id);
     send({ type: 'exit', id, durationMs: Date.now() - startedAt, ...fields });
   };
-  worker.on('message', ({ status, code, output }) => {
+  worker.on('message', ({ status, code, output, attachment }) => {
     for (let index = 0; index < output.length; index += MAX_CHUNK_CHARS) {
       send({ type: 'output', id, data: output.slice(index, index + MAX_CHUNK_CHARS) });
     }
-    finish({ status, code });
+    if (status !== 'ok' || !attachment) {
+      finish({ status, code });
+      return;
+    }
+    // The file travels before the call is reported as finished, so the extension has it when it answers. The
+    // worker ends on its own meanwhile, which must not count as the call ending.
+    job.sending = true;
+    sendAttachment(id, attachment).then(
+      () => finish({ status, code }),
+      (error) => {
+        send({ type: 'output', id, data: `\nThe file could not be read: ${error.message}` });
+        finish({ status: 'failed', code: 1 });
+      },
+    );
   });
   worker.on('error', (error) => finish({ status: 'spawn_error', code: null, error: error.message }));
-  worker.on('exit', () => finish({ status: job.stopReason || 'spawn_error', code: null, error: job.stopReason ? undefined : 'The tool stopped unexpectedly.' }));
+  worker.on('exit', () => {
+    if (job.sending && !job.stopReason) return;
+    finish({ status: job.stopReason || 'spawn_error', code: null, error: job.stopReason ? undefined : 'The tool stopped unexpectedly.' });
+  });
 }
 
 // The MCP servers the user set up for Claude Code and Codex, started on demand and kept until the browser
@@ -537,7 +566,7 @@ function handle(message) {
         version: VERSION,
         // What this host can do beyond running commands, so an extension newer than the host can say so
         // instead of waiting for an answer that never comes.
-        features: ['read-instructions', 'mcp'],
+        features: ['read-instructions', 'mcp', 'attachments'],
         extensionVersion: extensionVersion(),
         platform: process.platform,
         defaultShell: defaultShell(),

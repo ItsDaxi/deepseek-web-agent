@@ -28,7 +28,8 @@
     agents: '<path d="M6 8h12a2 2 0 0 1 2 2v7a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-7a2 2 0 0 1 2 -2z"/><path d="M12 8v-4"/><path d="M12 4h.01"/><path d="M9 13v.01"/><path d="M15 13v.01"/><path d="M9.5 16.5h5"/>',
     arrowLeft: '<path d="M5 12h14"/><path d="M5 12l6 6"/><path d="M5 12l6 -6"/>',
     spinner: '<path d="M12 3a9 9 0 1 0 9 9"/>',
-    x: '<path d="M18 6l-12 12"/><path d="M6 6l12 12"/>',
+    circle: '<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/>',
+    x:'<path d="M18 6l-12 12"/><path d="M6 6l12 12"/>',
     clock: '<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M12 7v5l2 2"/>',
     ban: '<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M5.7 5.7l12.6 12.6"/>',
   };
@@ -97,6 +98,47 @@
     .update a:focus-visible, .update button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5686fe); outline-offset: 1px; }
     svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     @media (prefers-reduced-motion: reduce) { .update, .back { transition: none; } }
+  `;
+
+  // The task list the model keeps, right above the composer, so it stays in view for as long as the chat is open.
+  // It follows DeepSeek's own tokens, and a click on its header folds it up to one line.
+  const TODO_STYLES = `
+    :host { display: block; align-self: stretch; margin: 0 0 8px; }
+    :host([hidden]) { display: none; }
+    * { box-sizing: border-box; }
+    .panel {
+      overflow: hidden; border-radius: 12px; font: 13px/20px Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: var(--dsw-alias-label-primary, #f9fafb);
+      border: 1px solid var(--dsw-alias-border-l2, rgba(255,255,255,.12));
+      background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.04));
+    }
+    .head {
+      display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 12px; border: 0; cursor: pointer; text-align: left;
+      font: inherit; font-weight: 600; color: inherit; background: none; outline: none;
+    }
+    .head:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.06)); }
+    .head:focus-visible { box-shadow: inset 0 0 0 2px var(--dsw-alias-brand-primary, #5686fe); }
+    .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .count { font-weight: 500; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-tertiary, #adb2b8); }
+    .head svg.chev { transition: transform .2s ease; }
+    .head[aria-expanded="false"] svg.chev { transform: rotate(-90deg); }
+    svg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    svg.chev { width: 13px; height: 13px; opacity: .7; }
+    .bar { height: 2px; background: var(--dsw-alias-border-l2, rgba(255,255,255,.12)); }
+    .bar i { display: block; height: 100%; background: var(--dsw-alias-state-success-primary, #22c55e); transition: width .3s ease; }
+    ul { margin: 0; padding: 6px 12px 10px; list-style: none; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+    ul[hidden] { display: none; }
+    li { display: flex; align-items: flex-start; gap: 8px; padding: 2px 0; }
+    li .mark { margin-top: 3px; }
+    li.done { color: var(--dsw-alias-label-tertiary, #adb2b8); }
+    li.done .text { text-decoration: line-through; }
+    li.done .mark { color: var(--dsw-alias-state-success-primary, #22c55e); }
+    li.active { font-weight: 600; }
+    li.active .mark { color: var(--dsw-alias-brand-text, #679efe); animation: spin 1s linear infinite; }
+    li.pending .mark { color: var(--dsw-alias-label-caption, #81858c); }
+    li .text { min-width: 0; overflow-wrap: anywhere; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { li.active .mark { animation: none; } .head svg.chev, .bar i { transition: none; } }
   `;
 
   // The line under the composer in a conversation: turns, time, speed and tokens. Quiet text, centred
@@ -456,6 +498,21 @@
     workspace.host.style.cssText = 'display: flex;';
     workspaceRow.append(workspace.host, agents.host);
 
+    // The task list, above the workspace row. Nothing shows until the model has written one.
+    const todo = attach(
+      'dsx-todo',
+      TODO_STYLES,
+      `<div class="panel"><button type="button" class="head" data-action="todo-toggle" aria-expanded="true">${iconMarkup('plan')}<span class="title">Tasks</span><span class="count"></span>${chevron()}</button><div class="bar"><i></i></div><ul></ul></div>`,
+    );
+    todo.host.hidden = true;
+    const todoHead = todo.shadow.querySelector('.head');
+    const todoTitle = todo.shadow.querySelector('.title');
+    const todoCount = todo.shadow.querySelector('.count');
+    const todoFill = todo.shadow.querySelector('.bar i');
+    const todoList = todo.shadow.querySelector('ul');
+    let todoKey = '';
+    let todoFolded = false;
+
     // Shown only while a conversation is open, and then only when it has figures.
     const stats = attach('dsx-stats', STATS_STYLES, '<div class="line"></div>');
     stats.host.hidden = true;
@@ -596,6 +653,7 @@
 
       permissionButton.setAttribute('aria-label', `Permissions: ${modeLabel(current.mode)}`);
       tips.permission = {
+        plan: 'Looks around and presents a plan. Nothing changes until you approve it',
         ask: 'Reads run by themselves in the workspace. Everything else asks first',
         workspace: 'Reads and edits run by themselves in the workspace. Commands ask first',
         bypass: 'Commands run without asking',
@@ -656,6 +714,46 @@
       menus.refresh();
       tooltip.refresh();
     }
+
+    // `tasks` is the model's list for the open chat: [{ text, status }] with status done, active or pending.
+    // Drawn as text nodes only, so nothing the model wrote can be taken for markup.
+    let lastTodos = [];
+    function setTodos(tasks) {
+      const list = Array.isArray(tasks) ? tasks : [];
+      lastTodos = list;
+      const key = `${todoFolded}${JSON.stringify(list)}`;
+      if (key === todoKey) return;
+      todoKey = key;
+      todo.host.hidden = list.length === 0;
+      const done = list.filter((task) => task.status === 'done').length;
+      const active = list.find((task) => task.status === 'active');
+      todoTitle.textContent = active && todoFolded ? active.text : 'Tasks';
+      todoCount.textContent = list.length ? `${done}/${list.length}` : '';
+      todoFill.style.width = list.length ? `${Math.round((done / list.length) * 100)}%` : '0%';
+      todoHead.setAttribute('aria-expanded', String(!todoFolded));
+      todoList.hidden = todoFolded;
+      todoList.replaceChildren(
+        ...list.map((task) => {
+          const item = document.createElement('li');
+          item.className = task.status;
+          const mark = document.createElement('span');
+          mark.className = 'mark';
+          mark.innerHTML = iconMarkup(task.status === 'done' ? 'check' : task.status === 'active' ? 'spinner' : 'circle');
+          const text = document.createElement('span');
+          text.className = 'text';
+          text.textContent = task.text;
+          item.append(mark, text);
+          return item;
+        }),
+      );
+    }
+
+    // The header folds the list up to one line, which names the task being worked on, and opens it again.
+    todoHead.addEventListener('click', trusted(() => {
+      todoFolded = !todoFolded;
+      todoKey = '';
+      setTodos(lastTodos);
+    }));
 
     // The way back to the main chat, in the tab of a helper or a tab opened to look at one.
     function setBack(visible) {
@@ -732,6 +830,8 @@
       // The workspace, and the agents beside it, sit right above the composer's rounded box.
       const box = findComposerBox(group);
       if (box && box.parentElement && workspaceRow.nextElementSibling !== box) box.parentElement.insertBefore(workspaceRow, box);
+      // The task list goes above the workspace row, so it stays in view with the composer.
+      if (box && box.parentElement && todo.host.nextElementSibling !== workspaceRow) box.parentElement.insertBefore(todo.host, workspaceRow);
       if (box) {
         // A new chat has no id in its address: the box glows. In a conversation the stats go under it.
         box.toggleAttribute('data-dsx-glow', !SESSION_IN_PATH.test(location.pathname));
@@ -754,7 +854,7 @@
       return true;
     }
 
-    return { update, mount, playModeWave, setContext, setStats, setTerminalOpen, setAgents, setBack, openPermission, openModel, openFileDialog, icon: iconMarkup };
+    return { update, mount, playModeWave, setContext, setStats, setTodos, setTerminalOpen, setAgents, setBack, openPermission, openModel, openFileDialog, icon: iconMarkup };
   }
 
   root.DsxPageControls = { createPageControls, findComposerBox };

@@ -12,11 +12,12 @@
   const { createChatStats, formatStats } = globalThis.DsxChatStats;
   const { createTerminal } = globalThis.DsxTerminal;
 
-  // mode is the permission preset: 'ask' (Read Only), 'workspace' (Workspace Write) or 'bypass' (Full access).
+  // mode is the permission preset: 'plan' (Plan Mode), 'ask' (Read Only), 'workspace' (Workspace Write) or
+  // 'bypass' (Full access). planReturnMode is the preset that was on before plan mode, which /plan goes back to.
   // workspaces are the folders the user chose before, listed in the workspace menu; cwd is the current one.
   // thinking is the Effort switch, which drives DeepSeek's DeepThink. Search is always on.
   // dismissedUpdate is the release tag whose notice the user closed.
-  const DEFAULT_SETTINGS = { mode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', terminalOpen: false, terminalWidth: 440, helperRetryMs: 0 };
+  const DEFAULT_SETTINGS = { mode: 'ask', planReturnMode: 'ask', cwd: '', workspaces: [], thinking: true, maxAutoTurns: 25, collapseThinking: true, dismissedUpdate: '', terminalOpen: false, terminalWidth: 440, helperRetryMs: 0 };
   const MAX_WORKSPACES = 8;
   // Used only when the model leaves out the timeout it is asked to choose.
   const FALLBACK_TIMEOUT_SECONDS = 120;
@@ -25,6 +26,10 @@
   const WORKSPACE_WRITE_TOOLS = new Set(['write', 'edit']);
   // A poll only reports on a job the user already approved, and a kill only stops one.
   const JOB_TOOLS = new Set(['poll', 'kill']);
+  // Plan mode refuses these outright, since they change things or leave the machine. A shell command still asks.
+  const PLAN_BLOCKED_TOOLS = new Set(['write', 'edit', 'mcp']);
+  const PLAN_REFUSED_NOTE = 'Plan mode is on, so this was not run and nothing was changed. Finish looking around with read, glob and grep, then present the plan with a plan tag. The user approves it before anything is changed.';
+  const PLAN_SHELL_NOTE = 'Plan mode: only run a command that changes nothing.';
   // Always asks first in Manual mode, even inside the working directory. Paths arrive with forward slashes.
   const SENSITIVE_PATH = /(^|\/)(\.env(\.[^/]*)?|\.netrc|\.npmrc|\.pypirc|id_(rsa|dsa|ecdsa|ed25519)|credentials(\.[^/]*)?|[^/]*\.(pem|key|pfx|p12))$|(^|\/)(\.ssh|\.aws|\.gnupg)(\/|$)/i;
   const EXECUTED_KEY = 'dsx-executed-ids';
@@ -151,7 +156,8 @@
     // A helper cannot ask the user to approve a call, so it is never told about the MCP tools.
     const mcp = helper ? [] : mcpServers.filter((server) => server.status === 'ready' && server.tools.length);
     const env = hostInfo ? { ...hostInfo, cwd: settings.cwd, extra: buildExtra(), mcp } : null;
-    postToPage({ type: 'config', env, thinking: settings.thinking !== false, agent: Boolean(helper) });
+    // A helper only looks, so it is not asked for a plan: its tools are refused one by one instead.
+    postToPage({ type: 'config', env, thinking: settings.thinking !== false, agent: Boolean(helper), plan: settings.mode === 'plan' && !helper });
   }
 
   // AGENTS.md and CLAUDE.md, in the user's folder and in the working folder and above it, as the host
@@ -368,6 +374,9 @@
       case 'output':
         appendOutput(message.id, message.data);
         break;
+      case 'attachment':
+        receiveAttachment(message);
+        break;
       case 'folder-picked':
         finishFolderPick(message);
         break;
@@ -386,6 +395,25 @@
     const unsent = Boolean(turn && turn.results.length);
     const draft = [...document.querySelectorAll('textarea')].some((area) => area.value.trim() !== '');
     return pending || unsent || draft;
+  }
+
+  // A file the model asked to read arrives from the host as numbered pieces of base64, before the call's exit.
+  // They wait here, by call, until the result is built.
+  const attachmentPieces = new Map();
+
+  function receiveAttachment(message) {
+    const entry = attachmentPieces.get(message.id) || { name: message.name, mime: message.mime, size: message.size, parts: message.parts, pieces: [] };
+    entry.pieces[message.part] = message.data;
+    attachmentPieces.set(message.id, entry);
+  }
+
+  // The finished file of a call, or null when there is none or a piece is missing. Taking it frees the pieces.
+  function takeAttachment(id) {
+    const entry = attachmentPieces.get(id);
+    attachmentPieces.delete(id);
+    if (!entry) return null;
+    for (let part = 0; part < entry.parts; part += 1) if (typeof entry.pieces[part] !== 'string') return null;
+    return { name: entry.name, mime: entry.mime, size: entry.size, data: entry.pieces.join('') };
   }
 
   function appendOutput(id, data) {
@@ -418,7 +446,9 @@
     }
   }
 
+  // Plan mode never skips a question: neither Full access nor "Always allow in this chat" counts in it.
   function isBypassed(tool) {
+    if (settings.mode === 'plan') return false;
     return settings.mode === 'bypass' || allowedChats.has(tool.sessionId);
   }
 
@@ -480,12 +510,28 @@
       refuseCommand(id, 'A helper cannot start other helpers. Do the work yourself, or say in your report what is left.');
       return;
     }
+    // The task list runs at once in every mode, since it changes nothing.
+    if (tool.kind === 'todo') {
+      runTodo(id);
+      return;
+    }
+    // The plan is the way out of plan mode, and only the user can approve it.
+    if (tool.kind === 'plan') {
+      if (helper) refuseCommand(id, 'A helper cannot present a plan. Do the work you were given and say what you found in your report.');
+      else if (settings.mode !== 'plan') refuseCommand(id, 'Plan mode is not on, so there is no plan to approve. Carry on with the request.');
+      return;
+    }
+    if (settings.mode === 'plan' && PLAN_BLOCKED_TOOLS.has(tool.kind)) {
+      refuseCommand(id, helper ? 'Plan mode is on, so nothing can be changed. Say in your report what you would change.' : PLAN_REFUSED_NOTE);
+      return;
+    }
     if (isSafeRead(tool)) {
       runCommand(id);
       return;
     }
     if (!isBypassed(tool) && !isWorkspaceWrite(tool)) {
       if (helper) refuseCommand(id, HELPER_NOTE);
+      else if (settings.mode === 'plan' && tool.kind === 'shell') store.set(id, { pausedReason: PLAN_SHELL_NOTE, noAlwaysAllow: true });
       return;
     }
 
@@ -561,6 +607,12 @@
       pausedReason: null,
     });
 
+    // The task list changes nothing on the computer, so a replay of it is just shown again, never asked about.
+    if (tool.kind === 'todo' && !event.live) {
+      applyTodo(tool, { replay: true });
+      store.set(event.id, { status: 'ok', expanded: false });
+      return;
+    }
     if (executedIds().has(event.id)) {
       store.set(event.id, { status: 'interrupted' });
       return;
@@ -720,6 +772,12 @@
       command: tool.kind === 'shell' ? tool.command : tool.kind === 'mcp' ? mcpName(tool) : tool.path || tool.command,
     };
     if (message.job) result.job = message.job;
+    // The file goes to the page hook with the result, which attaches it to the message that carries the result.
+    const attachment = message.status === 'ok' ? takeAttachment(message.id) : (attachmentPieces.delete(message.id), null);
+    if (attachment) {
+      result.attachment = attachment;
+      result.note = `${attachment.name} is attached to this message.`;
+    }
     if (started) result.note = `The command keeps running as background job ${message.job}. Read it with poll id="${message.job}".`;
     sendResult(updated, result);
   }
@@ -742,7 +800,111 @@
   }
 
   function rejectCommand(id) {
+    const tool = store.get(id);
+    if (tool && tool.kind === 'plan') {
+      refuseCommand(id, 'The user did not approve the plan. Plan mode is still on and nothing was changed. Ask what they want different, or revise the plan, and present it again.');
+      return;
+    }
     refuseCommand(id, 'The user rejected this. It did not run.');
+  }
+
+  // ---- The task list ----------------------------------------------------------------------------
+  // The model writes its whole list with a todo tag, and the page shows the latest one for each chat above the
+  // composer. It is kept in the tab's session storage so a reload does not lose it, and rebuilt from the chat's
+  // history when a chat is opened. A tool call's id carries the number of its message, which is what tells a
+  // newer list from an older one when both are replayed.
+  const TODO_KEY = 'dsx-todos';
+  const MAX_TODO_CHATS = 20;
+  let todoLists = readTodoLists();
+  let shownTodos = '';
+
+  function readTodoLists() {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(TODO_KEY) || '{}');
+      return stored && typeof stored === 'object' ? stored : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveTodoLists() {
+    const ids = Object.keys(todoLists);
+    for (const old of ids.slice(0, Math.max(0, ids.length - MAX_TODO_CHATS))) delete todoLists[old];
+    try {
+      sessionStorage.setItem(TODO_KEY, JSON.stringify(todoLists));
+    } catch {
+      // Storage can be blocked; the list then only lasts until the page reloads.
+    }
+  }
+
+  // How new a call is, from its id (chat-message-count). A call that is being written now has no message
+  // number yet, and counts as the newest.
+  function todoRank(id) {
+    const parts = String(id).split('-');
+    const message = Number(parts[parts.length - 2]);
+    const count = Number(parts[parts.length - 1]);
+    return Number.isFinite(message) && Number.isFinite(count) ? message * 1000 + count : Infinity;
+  }
+
+  // Keeps the list of a call as the chat's list, unless a newer one is already there.
+  function applyTodo(tool, { replay = false } = {}) {
+    if (helper || !tool.sessionId) return;
+    const rank = todoRank(tool.id);
+    const known = todoLists[tool.sessionId];
+    if (replay && known && Number.isFinite(known.rank) && rank <= known.rank) return;
+    const tasks = globalThis.DsxTodo.parseTodos(tool.command);
+    // Infinity does not survive JSON, so a live call is stored as the newest number that does.
+    todoLists[tool.sessionId] = { tasks, rank: Number.isFinite(rank) ? rank : Number.MAX_SAFE_INTEGER };
+    saveTodoLists();
+    renderTodos();
+  }
+
+  function runTodo(id) {
+    const tool = store.get(id);
+    if (!tool) return;
+    markExecuted(id);
+    applyTodo(tool);
+    const tasks = globalThis.DsxTodo.parseTodos(tool.command);
+    const summary = globalThis.DsxTodo.describeSaved(tasks);
+    const updated = store.set(id, { status: 'ok', autoRun: true, expanded: false, code: null, durationMs: 0, output: summary });
+    sendResult(updated, { status: 'ok', code: null, durationMs: 0, output: summary, tool: 'todo', command: 'todo' });
+  }
+
+  // The list of the chat that is open. A new chat has no id in its address yet, so it shows none until it has.
+  function renderTodos() {
+    const match = SESSION_IN_PATH.exec(location.pathname);
+    const tasks = !helper && match && todoLists[match[0]] ? todoLists[match[0]].tasks : [];
+    const key = JSON.stringify(tasks);
+    if (key === shownTodos) return;
+    shownTodos = key;
+    controls.setTodos(tasks);
+  }
+
+  // The user approved the plan: plan mode ends in the preset they chose, and the model is told to go ahead.
+  // The setting is applied here before the answer goes out, because the page hook reads it from the config
+  // and the storage event that would carry it there arrives a moment later.
+  function approvePlan(id, mode) {
+    const tool = store.get(id);
+    if (!tool || tool.kind !== 'plan' || tool.status !== 'awaiting') return;
+    settings.mode = mode;
+    saveSettings({ mode });
+    pushConfig();
+    renderControls();
+    controls.playModeWave(mode);
+    autoTurns = 0;
+    markExecuted(id);
+    const how = mode === 'workspace'
+      ? 'Edits inside the workspace run without asking, and commands still ask.'
+      : 'Every change asks the user first.';
+    const updated = store.set(id, { status: 'ok', expanded: false, code: null, durationMs: 0 });
+    sendResult(updated, {
+      status: 'ok',
+      code: null,
+      durationMs: 0,
+      output: `The user approved the plan. Plan mode is now off and you can change files and run commands. ${how} Carry out the plan now, step by step.`,
+      tool: 'plan',
+      command: 'plan',
+    });
   }
 
   function handleAction(action, id) {
@@ -761,6 +923,12 @@
         break;
       case 'reject':
         rejectCommand(id);
+        break;
+      case 'plan-approve-ask':
+        approvePlan(id, 'ask');
+        break;
+      case 'plan-approve-workspace':
+        approvePlan(id, 'workspace');
         break;
       case 'stop':
         // Stopping a helper closes its chat; its card then ends with what it had.
@@ -896,6 +1064,8 @@
     const flat = results.flatMap((result) => (Array.isArray(result) ? result : [result]));
     const resultById = new Map(flat.map((result) => [result.id, result]));
     for (const entry of tools) {
+      // The chat's task list is whatever its last todo call said, so a chat opened from the history has it back.
+      if (entry.tool === 'todo') applyTodo({ id: entry.id, sessionId: entry.sessionId, command: entry.command }, { replay: true });
       if (store.get(entry.id)) continue;
       const result = resultById.get(entry.id);
       const attributes = entry.attributes || {};
@@ -1077,6 +1247,7 @@
     renderContext();
     renderStats();
     renderAgents();
+    renderTodos();
     thinkCounter.schedule();
   }).observe(document, { childList: true, subtree: true, characterData: true });
 
@@ -1124,6 +1295,11 @@
     }
   }
 
+  // Switches the permission preset. Entering plan mode remembers the preset to go back to.
+  function changeMode(mode) {
+    saveSettings(mode === 'plan' && settings.mode !== 'plan' ? { mode, planReturnMode: settings.mode } : { mode });
+  }
+
   function startFolderPick() {
     if (folderRequest) return;
     if (!port || !hostInfo) {
@@ -1151,7 +1327,7 @@
 
   const controls = createPageControls({
     onPickFolder: startFolderPick,
-    onChangeMode: (mode) => saveSettings({ mode }),
+    onChangeMode: changeMode,
     onSelectWorkspace: (cwd) => saveSettings({ cwd }),
     onSetThinking: (thinking) => saveSettings({ thinking }),
     onDismissUpdate: (tag) => saveSettings({ dismissedUpdate: tag }),
@@ -1282,6 +1458,23 @@
       run: () => {
         controls.openPermission(() => slashCommands.clearCommandText());
         return { lines: [] };
+      },
+    },
+    {
+      name: 'plan',
+      group: 'Commands',
+      icon: 'shield',
+      description: 'Turn plan mode on or off',
+      run: () => {
+        const back = globalThis.DsxMenus.MODES.some((mode) => mode.id === settings.planReturnMode && mode.id !== 'plan') ? settings.planReturnMode : 'ask';
+        const next = settings.mode === 'plan' ? back : 'plan';
+        controls.playModeWave(next);
+        changeMode(next);
+        return {
+          lines: [next === 'plan'
+            ? 'Plan mode is on. The model looks around and presents a plan, and nothing changes until you approve it.'
+            : `Plan mode is off. Permissions: ${modeLabel(next)}.`],
+        };
       },
     },
     {

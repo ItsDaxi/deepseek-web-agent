@@ -6,7 +6,7 @@ This is unofficial and has nothing to do with DeepSeek. It relies on the site's 
 
 ## What it does
 
-The extension adds a hidden prompt to your messages that teaches the model six tools: `read`, `write`, `edit`, `glob`, `grep` and `shell`, plus helpers for long jobs (see Helpers) and the tools of your MCP servers (see MCP servers). When the model uses one, the extension takes the call out of the response before the page draws it, shows a card in its place, and runs the call through a small native program on your machine. The result goes back to the model as a hidden message.
+The extension adds a hidden prompt to your messages that teaches the model six tools: `read`, `write`, `edit`, `glob`, `grep` and `shell`, plus helpers for long jobs (see Helpers), the tools of your MCP servers (see MCP servers), and a plan mode that makes the model show a plan before it changes anything (see Plan mode), and a task list that stays above the composer (see Task list). `read` also works on images, PDFs and Office documents (see Images, PDFs and documents). When the model uses one, the extension takes the call out of the response before the page draws it, shows a card in its place, and runs the call through a small native program on your machine. The result goes back to the model as a hidden message.
 
 The hidden prompt is added to outgoing requests and removed from the history again, so it never shows up in the chat. DeepSeek's own web search and DeepThink keep working.
 
@@ -51,11 +51,14 @@ The extension reloads itself after the setup updates its files, which works for 
 
 You need [Node.js](https://nodejs.org) 18 or newer. This is also the way to install on macOS and Linux.
 
-1. Register the native host, which is the part that actually runs commands:
+1. Get the code and open a terminal in the project's top folder, the one that holds both `extension` and `host`. If you downloaded the zip from GitHub, unzip it and `cd` into the result (it is called `deepseek-web-agent-main`). Then register the native host, which is the part that actually runs commands:
 
    ```bash
+   cd path/to/deepseek-web-agent-main
    node host/install.js
    ```
+
+   The script is `host/install.js`, not `install/host.js`, and it must be run from the top folder, not from inside `extension`. A `Cannot find module` error means the terminal is in the wrong folder or the path is mistyped. Run `ls` and check that you see `extension` and `host` before you run it.
 
    Add `--browsers brave,chrome` to pick browsers (`chrome`, `brave`, `chromium`, `edge`, `firefox`). The path of the host is written into the registration, so run this again if you move the folder or change your Node installation.
 
@@ -71,7 +74,7 @@ All controls sit in the composer of the DeepSeek page. The extension has no tool
 
 - **Default workspace**, above the composer, is the working directory. Its menu lists the folders you used before; "Add workspace..." opens your system's folder dialog.
 - The paperclip opens DeepSeek's own file dialog.
-- The permission button (**Read Only**, **Workspace Write**, **Full access**) opens a menu of presets. A short pixel wave crosses the composer when you change it.
+- The permission button (**Plan Mode**, **Read Only**, **Workspace Write**, **Full access**) opens a menu of presets. A short pixel wave crosses the composer when you change it.
 - The model button opens a small panel. The model is fixed. **Effort** is on or off and works exactly like DeepSeek's DeepThink button, which the extension hides and drives for you. Search is always on, and its button is hidden too.
 - "Thought for N seconds" blocks are kept collapsed. Click one to read it, and it stays open. To stop this, run `chrome.storage.local.set({ collapseThinking: false })` in the extension's service worker console.
 - The model panel (click the model name above the send button) has a Context row: the tokens the chat has used against the model's 1M-token window, like `212K / 1M`, with a thin bar that turns amber and then red as it fills. It updates at the end of every reply, with the total DeepSeek counts.
@@ -94,6 +97,7 @@ A message that only starts with a slash, such as `/etc/hosts what is this file`,
 | `/file` | Opens DeepSeek's file dialog, like the paperclip. |
 | `/feedback` | Opens the project's issue page in a new tab. |
 | `/permission` | Opens the permission presets, like the permission button. |
+| `/plan` | Turns plan mode on, or off again, going back to the preset you had before. See Plan mode. |
 | `/model` | Opens the model panel, like the model button. |
 | `/status` | Shows the extension version, the shell host, the permissions, the workspace, the instruction files found, the MCP servers and their tools, the effort and the thinking setting. |
 | `/thinking collapse` or `/thinking default` | Keeps the thinking blocks collapsed, or leaves them as DeepSeek shows them. |
@@ -102,6 +106,42 @@ A message that only starts with a slash, such as `/etc/hosts what is this file`,
 | `/help` | Lists the commands. |
 
 A command answers in a small panel above the composer, which closes by itself or when you click it.
+
+### Images, PDFs and documents
+
+The model can look at files that are not text, on your computer: images (`png`, `jpg`, `gif`, `webp`, `bmp`, `tiff`, `avif`), PDFs, Word, Excel and PowerPoint files (`docx`, `xlsx`, `pptx` and the old `doc`, `xls`, `ppt`) and `epub` books. It uses the same `read` tool as for any file, and you ask for it in plain words: "look at `C:\scans\invoice.pdf`" or "what is on this screenshot, `shots/error.png`?".
+
+`read` cannot print such a file, so the host sends its bytes to the page, and the page takes them as if you had picked the file with the paperclip. DeepSeek uploads and parses it, and the message that carries the result of the call goes out with the file attached. What the model gets is what DeepSeek makes of the file: the text of a PDF or an Office document, and the text it recognises in an image. This extension does not read the files itself, and a picture's contents that DeepSeek's chat does not describe do not reach the model.
+
+- The call is approved like any other `read`: it runs by itself inside the workspace and asks first anywhere else. The card says which file it is.
+- A file can be at most 20 MB, and one message carries at most 10 files. DeepSeek has limits of its own too, and when it refuses a file (too long, empty, unreadable) the model is told why and carries on without it.
+- A message that carries a file keeps the page's own search setting instead of forcing search on, because DeepSeek does not allow both together for some models.
+- The file is sent to DeepSeek's servers, like everything a tool reads. Do not ask for one you would not paste into the chat.
+- A helper can attach files too, with the same rules.
+
+### Plan mode
+
+Plan mode makes the model look first and change nothing until you have approved a plan. Choose **Plan Mode** in the permission menu, or type `/plan`; type it again to go back to the preset you had.
+
+While it is on:
+
+- The model reads, lists and searches by itself, inside the workspace, and may hand a large search to a helper. A command asks you first, with a reminder that it must only look, and "Always allow in this chat" is not offered. `write`, `edit` and MCP calls are refused without asking, and the model is told so.
+- The hidden prompt tells the model about plan mode with every message, so it works in a chat that was already running. It also tells the model to present its plan with a plan tag when it is ready: the goal, the files and what changes in each, the steps in order, the risks and how to check the result. A question, or a request that needs no change, is simply answered.
+- The plan arrives as a card, **Approve this plan?**, with the plan written out. **Approve, ask for each change** ends plan mode in Read Only. **Approve, edit the workspace freely** ends it in Workspace Write. **Keep planning** tells the model the plan was not approved, so it asks what you want different or revises it. Either approval tells the model to carry the plan out, and the permission button shows the new preset.
+- Full access and "Always allow in this chat" do not count in plan mode: nothing is skipped.
+- A helper in plan mode can only look. It cannot present a plan: it reports what it found.
+
+Plan mode steers the model, and the refusal of `write`, `edit` and MCP calls is enforced by the extension. A command is not: it can still change things once you approve it, so read it before you do.
+
+### Task list
+
+For work that takes three steps or more, the model keeps a task list, as the other coding agents do. It writes the whole list each time it changes, with a `todo` tag, one task to a line: `[ ]` to do, `[~]` being worked on, `[x]` done. The list is not an action on your computer, so it runs at once in every mode, without a question.
+
+- The list sits **above the composer**, over the workspace button, for as long as the chat is open, so you can follow where the model is without scrolling. It shows a bar of how many tasks are done (`2/5`), strikes the finished ones and spins on the one in hand. Click its header to fold it into one line that names the current task, and again to open it.
+- Each update also leaves a small card in the chat, `Tasks 2/5`, which opens to the list as the model wrote it.
+- Every chat has its own list. It comes back when you reload the page and when you open the chat from the history, because it is rebuilt from the last list the model wrote in it.
+- A list holds at most 30 tasks, each cut at 200 characters. An empty one clears it.
+- It also works in plan mode. A helper has no list, since nobody would see it.
 
 ### Instruction files
 
@@ -193,6 +233,7 @@ It needs Node.js, git and the [GitHub CLI](https://cli.github.com) logged in to 
 
 | Preset | What happens |
 | --- | --- |
+| Plan Mode | `read`, `glob` and `grep` run by themselves inside the workspace. `write`, `edit` and MCP calls are refused, and `shell` asks. The model presents a plan, and you approve it to leave this mode. See Plan mode. |
 | Read Only (default) | `shell`, `write` and `edit` wait for your approval, with a diff for edits. `read`, `glob` and `grep` run by themselves inside the workspace you picked, and ask first anywhere else and for sensitive files such as `.env` and SSH keys. "Always allow in this chat" skips the question until the page is reloaded. |
 | Workspace Write | Like Read Only, and `write` and `edit` also run by themselves inside the workspace, except for sensitive files. `shell` still asks, because a command can reach anywhere. |
 | Full access | Commands run at once, without asking. Cards are marked `auto`. |
@@ -209,7 +250,7 @@ Read this before you use Full access.
 - The danger labels on approval cards are pattern matches. They miss things, so read the command itself.
 - `AGENTS.md` and `CLAUDE.md` in a folder you pick are given to the model as instructions from you, without asking. A repository you downloaded can contain text meant to steer the model into running commands. Pick only folders you trust, and keep Read Only or Workspace Write for anything else. `/status` shows which files were read.
 - The side terminal runs what you type with your own rights, without asking: it is you typing. Pasting a command from a web page into it is as dangerous as in any terminal. Only your own keys and clicks work in it: a script on the page cannot type into it.
-- Everything a tool reads and everything a command prints is sent to DeepSeek's servers, secrets included. `glob` and `grep` skip common secret files. `shell` and an approved `read` do not.
+- Everything a tool reads and everything a command prints is sent to DeepSeek's servers, secrets included. `glob` and `grep` skip common secret files. `shell` and an approved `read` do not. An image, a PDF or a document that `read` attaches is uploaded to DeepSeek as a file, with the same approval rules as any `read`.
 - MCP servers run with your rights, started by the host from your own config files, and whatever one returns is sent to DeepSeek too. The tokens in those files stay on your machine: the model is shown the names of the tools, never the config. Approve a call only after reading its arguments, and remember that what a server returns can contain instructions meant to steer the model.
 
 ## How it works
@@ -223,8 +264,9 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/lib/protocol.js` | The hidden prompt, the tool syntax and the format of result messages |
 | `extension/lib/stream-filter.js` | Removes tool syntax from the response stream and from the history |
 | `extension/lib/chat-stats.js` | The figures of the stats line under the composer: turns, steps, time, speed and tokens |
+| `extension/lib/todo.js` | Reads the model's task list and says how far it is |
 | `extension/lib/context-usage.js` | Reads the token total DeepSeek counts for a chat, and the model's token limit, for the Context row of the model panel |
-| `extension/page-hook.js` | Wraps `XMLHttpRequest` and sends results through the page's own composer |
+| `extension/page-hook.js` | Wraps `XMLHttpRequest`, sends results through the page's own composer, and puts the files `read` attached into the page's file input |
 | `extension/content.js` | Approval decisions, the life of each command, and changes to the page |
 | `extension/cards.js` | Draws the tool cards |
 | `extension/terminal.js` | The side terminal panel |
@@ -235,7 +277,7 @@ page-hook.js (page world)  <->  content.js + cards.js (isolated world)  <->  bac
 | `extension/think-tokens.js` | Shows the reasoning token count in each thinking block |
 | `extension/background.js` | Connects tabs to the native host |
 | `host/host.js` | Runs commands and tools, streams output, enforces timeouts and kills |
-| `host/tools.js` | The `read`, `write`, `edit`, `glob` and `grep` tools |
+| `host/tools.js` | The `read`, `write`, `edit`, `glob` and `grep` tools, and the check that decides a file is attached rather than printed |
 | `host/instructions.js` | Finds the `AGENTS.md` and `CLAUDE.md` files for the working folder |
 | `host/mcp-config.js` | Reads the MCP servers set up for Claude Code (`~/.claude.json`), Codex (`~/.codex/config.toml`) and `~/.dsx/mcp.json` |
 | `host/mcp.js` | The MCP client: starts the servers (stdio or streamable HTTP), lists their tools and calls them |

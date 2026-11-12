@@ -20,6 +20,7 @@
     file: '<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/>',
     pencil: '<path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/>',
     search: '<path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/><path d="M21 21l-6 -6"/>',
+    list: '<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M5 6h.01"/><path d="M5 12h.01"/><path d="M5 18h.01"/>',
   };
 
   const TOOL_INFO = {
@@ -32,6 +33,10 @@
     poll: { question: 'Read this background job?', icon: 'clock', action: 'Allow', verb: 'Poll' },
     kill: { question: 'Stop this background job?', icon: 'stop', action: 'Stop', verb: 'Stop' },
     mcp: { question: 'Call this MCP tool?', icon: 'plug', action: 'Allow' },
+    // The plan of plan mode. Its card has buttons of its own, see renderPlanApproval.
+    plan: { question: 'Approve this plan?', icon: 'list', action: 'Approve' },
+    // The task list runs by itself and only ever shows as a finished card, since it changes nothing.
+    todo: { question: 'Update the task list?', icon: 'list', action: 'Update' },
     // A helper starts by itself, so its question only shows for a call replayed from an old chat.
     agent: { question: 'Start a helper for this task?', icon: 'search', action: 'Start' },
   };
@@ -129,6 +134,8 @@
   function toolTitle(tool) {
     if (tool.kind === 'agent') return `Helper: ${tool.attributes?.description || firstLine(tool.command) || 'working'}`;
     if (tool.kind === 'mcp') return `MCP ${tool.attributes?.server || '?'}: ${tool.attributes?.tool || '?'}`;
+    if (tool.kind === 'plan') return 'Plan';
+    if (tool.kind === 'todo') return root.DsxTodo ? root.DsxTodo.titleOf(root.DsxTodo.parseTodos(tool.command)) : 'Tasks';
     const { verb } = toolInfo(tool);
     if (!verb) return firstLine(tool.command);
     const subject = tool.kind === 'glob' || tool.kind === 'grep' ? firstLine(tool.command) : tool.path;
@@ -170,6 +177,10 @@
       }
       case 'read':
         return el('pre', { text: tool.path });
+      case 'plan':
+        return el('pre', { className: 'content', text: tool.command });
+      case 'todo':
+        return el('pre', { text: tool.command || '(empty list)' });
       case 'glob':
       case 'grep':
         return el('pre', { text: [tool.command, location].filter(Boolean).join('\n') });
@@ -223,15 +234,35 @@
 
     function renderWriting(tool) {
       const isShell = tool.kind === 'shell';
+      const label = isShell ? 'Writing command…' : tool.kind === 'mcp' ? 'Writing MCP call…' : tool.kind === 'plan' ? 'Writing the plan…' : tool.kind === 'todo' ? 'Updating the task list…' : `${toolInfo(tool).verb} ${tool.path}…`.replace(/ …$/, '…');
       return el(
         'div',
         { className: 'card' },
-        el('div', { className: 'head' }, icon('spinner', 'spin brand'), el('span', { className: 'title', text: isShell ? 'Writing command…' : tool.kind === 'mcp' ? 'Writing MCP call…' : `${toolInfo(tool).verb} ${tool.path}…`.replace(/ …$/, '…') })),
-        (isShell || tool.kind === 'write') && tool.command ? el('pre', { className: 'content', text: tool.command, dataset: { follow: '1' } }) : null,
+        el('div', { className: 'head' }, icon('spinner', 'spin brand'), el('span', { className: 'title', text: label })),
+        (isShell || tool.kind === 'write' || tool.kind === 'plan') && tool.command ? el('pre', { className: 'content', text: tool.command, dataset: { follow: '1' } }) : null,
+      );
+    }
+
+    // The plan asks for more than a yes: the user also says how the work that follows is to be approved.
+    function renderPlanApproval(tool) {
+      return el(
+        'div',
+        { className: 'card' },
+        el('div', { className: 'head' }, icon('list', 'brand'), el('span', { className: 'title', text: 'Approve this plan?' }), el('span', { className: 'meta', text: 'plan mode' })),
+        toolDetail(tool),
+        el('div', { className: 'note', text: 'Nothing has been changed. Approving ends plan mode and the model starts the work.' }),
+        el(
+          'div',
+          { className: 'actions' },
+          button('Approve, ask for each change', 'plan-approve-ask', tool.id, 'primary'),
+          button('Approve, edit the workspace freely', 'plan-approve-workspace', tool.id),
+          button('Keep planning', 'reject', tool.id),
+        ),
       );
     }
 
     function renderApproval(tool) {
+      if (tool.kind === 'plan') return renderPlanApproval(tool);
       const info = toolInfo(tool);
       const danger = tool.kind === 'shell' ? dangerLabel(tool.command) : null;
       const location = tool.kind === 'shell' ? [tool.shell, tool.cwd].filter(Boolean).join(' · ') : tool.cwd;
@@ -252,7 +283,7 @@
           { className: 'actions' },
           button(danger ? 'Run anyway' : info.action, 'run', tool.id, danger ? 'destructive' : 'primary'),
           button('Reject', 'reject', tool.id),
-          danger ? null : button('Always allow in this chat', 'allow-chat', tool.id, 'quiet'),
+          danger || tool.noAlwaysAllow ? null : button('Always allow in this chat', 'allow-chat', tool.id, 'quiet'),
         ),
       );
     }
@@ -348,16 +379,19 @@
       });
       const card = el('div', { className: 'card' }, head);
       if (tool.expanded) {
-        if (tool.kind === 'write' || tool.kind === 'edit' || tool.kind === 'mcp') {
+        if (tool.kind === 'write' || tool.kind === 'edit' || tool.kind === 'mcp' || tool.kind === 'plan' || tool.kind === 'todo') {
           card.append(toolDetail(tool));
         } else if (tool.kind === 'shell' && (tool.command.includes('\n') || tool.cwd)) {
           card.append(el('pre', { text: tool.cwd ? `# ${tool.cwd}\n${tool.command}` : tool.command }));
         } else if (tool.kind === 'agent' && tool.command) {
           card.append(el('pre', { text: `Task:\n${tool.command}` }));
         }
-        const body = tool.error || tool.output;
+        // The answer to a plan is a sentence for the model, not output, so the plan alone is shown.
+        const body = tool.kind === 'plan' || tool.kind === 'todo' ? '' : tool.error || tool.output;
         if (body) card.append(el('pre', { className: 'output', text: body }));
-        else card.append(el('div', { className: 'note', text: tool.status === 'rejected' ? 'This command did not run.' : tool.kind === 'agent' ? 'The helper left no report.' : 'No output.' }));
+        else if (tool.kind === 'todo') { /* the list above is all there is to show */ }
+        else if (tool.kind !== 'plan') card.append(el('div', { className: 'note', text: tool.status === 'rejected' ? 'This command did not run.' : tool.kind === 'agent' ? 'The helper left no report.' : 'No output.' }));
+        else card.append(el('div', { className: 'note', text: tool.status === 'ok' ? 'Approved.' : tool.status === 'rejected' ? 'Not approved: the model was told to revise the plan.' : 'This plan was not acted on.' }));
         if (tool.truncated) card.append(el('div', { className: 'note', text: 'Long output: the model received a shortened version.' }));
       }
       if (tool.sendFailed) {

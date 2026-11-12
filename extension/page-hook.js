@@ -15,6 +15,8 @@
     '/api/v0/chat/resume_stream',
   ];
   const HISTORY_PATH = '/api/v0/chat/history_messages';
+  const UPLOAD_PATH = '/api/v0/file/upload_file';
+  const FILES_PATH = '/api/v0/file/fetch_files';
   const SETTINGS_PATH = '/api/v0/client/settings';
   const MODEL_STORE_KEY = '__ds_remote_feature_store_model';
   const STORE_READ_DELAY_MS = 500;
@@ -28,8 +30,10 @@
   const ENTER_ATTEMPTS = 3;
   const TITLE_MAX_CHARS = 40;
 
-  // `agent` is true in the tab of a helper, whose chat gets no helper tool.
-  const config = { env: null, thinking: null, agent: false };
+  // `agent` is true in the tab of a helper, whose chat gets no helper tool. `plan` is true while plan mode is on.
+  const config = { env: null, thinking: null, agent: false, plan: false };
+  // The chats that were told plan mode is on, by session id, so one is told once when it ends.
+  const planSent = new Set();
   // The last message a helper's tab sent through the composer, kept so it can be sent again after DeepSeek
   // refused it with a rate limit: { key, body } for a result, { text } for the opening task.
   let lastSent = null;
@@ -78,6 +82,18 @@
     return path === '/api/v0/chat/edit_message' && Number(body.message_id) === 1;
   }
 
+  // What a message of this chat has to say about plan mode. The plan block goes out with every message while the
+  // mode is on, and a chat that had it hears once that it is over.
+  function planFlags(sessionId) {
+    const key = sessionId || '';
+    if (config.plan) {
+      planSent.add(key);
+      return { plan: true, planRetire: false };
+    }
+    if (planSent.delete(key)) return { plan: false, planRetire: true };
+    return { plan: false, planRetire: false };
+  }
+
   function rewriteRequestBody(request, rawBody) {
     let body = null;
     try {
@@ -89,7 +105,10 @@
     // The Effort switch decides DeepThink, and Search is always on. The page's own buttons are kept in
     // step with this by the content script, so this only matters when they could not be.
     if (typeof config.thinking === 'boolean' && 'thinking_enabled' in body) body.thinking_enabled = config.thinking;
-    if ('search_enabled' in body) body.search_enabled = true;
+    // A message that carries files keeps the page's own choice: with some models DeepSeek does not allow search
+    // and files together, and the page turns search off then.
+    const hasFiles = Array.isArray(body.ref_file_ids) && body.ref_file_ids.length > 0;
+    if ('search_enabled' in body && !hasFiles) body.search_enabled = true;
     if (typeof body.prompt !== 'string') return JSON.stringify(body);
 
     const marker = RESULT_MARKER.exec(body.prompt.trim());
@@ -111,7 +130,7 @@
       const sentMcp = mcpSent.get(request.sessionId) || '';
       const mcp = wantedMcp && wantedMcp !== sentMcp ? wantedMcp : null;
       const mcpRetire = !wantedMcp && Boolean(sentMcp);
-      body.prompt = Protocol.injectPrompt(body.prompt, config.env, { full, extra, retire, agents: !config.agent, mcp, mcpRetire });
+      body.prompt = Protocol.injectPrompt(body.prompt, config.env, { full, extra, retire, agents: !config.agent, mcp, mcpRetire, ...planFlags(request.sessionId) });
       if (extra) extraSent.set(request.sessionId, extra);
       if (retire) extraSent.delete(request.sessionId);
       if (mcp) mcpSent.set(request.sessionId, mcp);
@@ -132,6 +151,9 @@
         requests.set(this, { kind: 'history', sessionId: parsed.searchParams.get('chat_session_id') });
       } else if (STREAM_PATHS.includes(parsed.pathname)) {
         requests.set(this, { kind: 'stream', path: parsed.pathname, headers: {}, seen: 0, output: '' });
+      } else if (parsed.pathname === UPLOAD_PATH || parsed.pathname === FILES_PATH) {
+        // Only watched, to know when the files the model asked to read are uploaded and parsed.
+        requests.set(this, { kind: 'file', path: parsed.pathname });
       } else if (parsed.pathname === SETTINGS_PATH && parsed.searchParams.get('scope') === 'model') {
         // Only read, to learn how many tokens a chat can hold. The page gets the answer untouched.
         requests.set(this, { kind: 'settings' });
@@ -154,6 +176,7 @@
       return nativeSend.call(this, outgoing);
     }
     if (request && request.kind === 'settings') this.addEventListener('load', () => reportContextLimit(this));
+    if (request && request.kind === 'file') watchFileRequest(this, request.path);
     return nativeSend.call(this, body);
   };
 
@@ -290,6 +313,157 @@
     },
   });
 
+  // ---- Files the model asked to read -----------------------------------------------------------
+  // `read` on an image, a PDF or an Office document does not print anything: the host sends the bytes, and the
+  // page's own upload takes them as if the user had picked the file with the paperclip. DeepSeek uploads the file
+  // and parses it, and the message that carries the result goes out with it, so the model gets what DeepSeek
+  // extracted. This waits until the upload and the parsing are done, which it learns by watching the two
+  // requests the page makes for them. Nothing here reads or changes what the page sends.
+
+  const MAX_ATTACHED_FILES = 10;
+  const FILE_WAIT_MS = 120000;
+  const FILE_FIRST_REQUEST_MS = 6000;
+  const FILE_FAILED = {
+    FAILED: 'DeepSeek could not read it',
+    CONTENT_FILTER: 'DeepSeek refused it',
+    CONTENT_TOO_LONG: 'it is too long for the chat',
+    CONTENT_EMPTY: 'DeepSeek found nothing to read in it',
+    CANCELLED: 'the upload was cancelled',
+  };
+  const FILE_PENDING = new Set(['PENDING', 'PARSING']);
+
+  const fileWatch = {
+    active: false,
+    started: 0,
+    inflight: 0,
+    failure: null,
+    statuses: new Map(),
+    begin() {
+      Object.assign(this, { active: true, started: 0, inflight: 0, failure: null });
+      this.statuses.clear();
+    },
+    end() {
+      this.active = false;
+    },
+    requestStarted(path) {
+      if (!this.active || path !== UPLOAD_PATH) return;
+      this.started += 1;
+      this.inflight += 1;
+    },
+    requestEnded(path, status, payload) {
+      if (!this.active) return;
+      const data = payload && payload.data;
+      if (path === UPLOAD_PATH) {
+        this.inflight = Math.max(0, this.inflight - 1);
+        if (status >= 400 || status === 0) this.failure = status ? `the upload failed (${status})` : 'the upload failed';
+        else if (data && data.biz_code) this.failure = data.biz_msg || 'DeepSeek refused the upload';
+      }
+      const files = path === UPLOAD_PATH ? [data && data.biz_data] : data && data.biz_data && data.biz_data.files;
+      for (const file of Array.isArray(files) ? files : []) {
+        if (file && file.id && typeof file.status === 'string') this.statuses.set(file.id, file.status);
+      }
+    },
+    // `ready` once every upload started has ended and no file is still being parsed; `failure` says why not.
+    state(expected) {
+      let pending = 0;
+      let failure = this.failure;
+      for (const status of this.statuses.values()) {
+        if (FILE_PENDING.has(status)) pending += 1;
+        else if (!failure && FILE_FAILED[status]) failure = FILE_FAILED[status];
+      }
+      return { failure, ready: this.started >= expected && this.inflight === 0 && pending === 0, started: this.started };
+    },
+  };
+
+  function watchFileRequest(xhr, path) {
+    fileWatch.requestStarted(path);
+    xhr.addEventListener('loadend', () => {
+      let payload = null;
+      try {
+        payload = xhr.responseType === 'json' ? nativeResponse.call(xhr) : JSON.parse(nativeResponseText.call(xhr));
+      } catch {
+        // Not JSON: only the status counts.
+      }
+      fileWatch.requestEnded(path, xhr.status, payload);
+    });
+  }
+
+  // The page may use fetch for these two requests instead of XHR, so it is watched the same way. The answer
+  // is read from a copy and the page gets its own, untouched.
+  const nativeFetch = window.fetch;
+  if (typeof nativeFetch === 'function') {
+    window.fetch = function (input, init) {
+      const promise = nativeFetch.apply(this, arguments);
+      try {
+        const url = parseUrl(typeof input === 'string' ? input : input && input.url);
+        if (url && url.origin === location.origin && (url.pathname === UPLOAD_PATH || url.pathname === FILES_PATH)) {
+          fileWatch.requestStarted(url.pathname);
+          promise.then(
+            (response) => response.clone().json().catch(() => null).then((payload) => fileWatch.requestEnded(url.pathname, response.status, payload)),
+            () => fileWatch.requestEnded(url.pathname, 0, null),
+          );
+        }
+      } catch {
+        // Watching must never get in the page's way.
+      }
+      return promise;
+    };
+  }
+
+  function filesOf(results) {
+    return results.map((result) => result && result.attachment).filter(Boolean).slice(0, MAX_ATTACHED_FILES);
+  }
+
+  function base64ToBytes(text) {
+    const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0;
+    const bytes = new Uint8Array(Math.floor(text.length / 4) * 3 - padding);
+    const SLICE = 1 << 20; // a multiple of 4, so every slice decodes on its own
+    let offset = 0;
+    for (let start = 0; start < text.length; start += SLICE) {
+      const binary = atob(text.slice(start, start + SLICE));
+      for (let index = 0; index < binary.length; index += 1) bytes[offset++] = binary.charCodeAt(index);
+    }
+    return bytes;
+  }
+
+  // The page's hidden file input, the one the paperclip opens.
+  function findFileInput() {
+    const inputs = [...document.querySelectorAll('input[type="file"]')];
+    return inputs.find((input) => /\.pdf\b/i.test(input.accept || '')) || inputs[0] || null;
+  }
+
+  // Puts the files into the page's file input, as the file dialog would, and waits until DeepSeek has them.
+  // Resolves { ok: true }, or { ok: false, reason } when they could not be attached.
+  async function attachFiles(files) {
+    const input = findFileInput();
+    if (!input) return { ok: false, reason: 'this chat has no file upload' };
+    let transfer;
+    try {
+      transfer = new DataTransfer();
+      for (const file of files) transfer.items.add(new File([base64ToBytes(file.data)], file.name, { type: file.mime }));
+    } catch (error) {
+      return { ok: false, reason: `the file could not be prepared: ${error.message}` };
+    }
+    fileWatch.begin();
+    try {
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < FILE_WAIT_MS) {
+        const state = fileWatch.state(files.length);
+        if (state.failure) return { ok: false, reason: state.failure };
+        if (state.ready) return { ok: true };
+        // No upload request was seen at all: the page took the files by a way that cannot be watched, so the
+        // sending below simply tries until the page lets the message go.
+        if (!state.started && Date.now() - startedAt > FILE_FIRST_REQUEST_MS) return { ok: true };
+        await delay(200);
+      }
+      return { ok: false, reason: 'DeepSeek took too long to read it' };
+    } finally {
+      fileWatch.end();
+    }
+  }
+
   // ---- Sending results through the page's own composer ---------------------------------------
 
   function findComposer() {
@@ -397,6 +571,15 @@
         );
         if (index === -1 || activeStreams > 0) break;
         const [entry] = resultQueue.splice(index, 1);
+        // Files the model asked to read go into the composer first, so the message that carries the result takes
+        // them along. When they cannot be attached the model is told, and the result goes out without them.
+        if (entry.files && entry.files.length) {
+          const attached = await attachFiles(entry.files);
+          entry.files = null;
+          if (!attached.ok && pendingResults.has(entry.key)) {
+            pendingResults.set(entry.key, `${pendingResults.get(entry.key)}\n\n${Protocol.buildFileFailure(attached.reason)}`);
+          }
+        }
         if (config.agent) lastSent = { key: entry.key, ids: entry.ids, sessionId: entry.sessionId, body: pendingResults.get(entry.key) };
         const sent = await sendThroughComposer(entry);
         if (!sent) {
@@ -428,6 +611,7 @@
       config.env = message.env;
       config.thinking = typeof message.thinking === 'boolean' ? message.thinking : null;
       config.agent = message.agent === true;
+      config.plan = message.plan === true;
     } else if (message.type === 'send-prompt') {
       // The task is wrapped here because the protocol library only loads in the page's world.
       lastSent = { text: message.task };
@@ -443,8 +627,8 @@
       }
     } else if (message.type === 'send-result') {
       const body = Protocol.buildResultMessage({ id: message.id, ...message.result });
-      pendingResults.set(message.id, Protocol.injectPrompt(body, config.env, { full: false, agents: !config.agent }));
-      resultQueue.push({ key: message.id, ids: [message.id], sessionId: message.sessionId });
+      pendingResults.set(message.id, Protocol.injectPrompt(body, config.env, { full: false, agents: !config.agent, ...planFlags(message.sessionId) }));
+      resultQueue.push({ key: message.id, ids: [message.id], sessionId: message.sessionId, files: filesOf([message.result]) });
       pumpResults();
     } else if (message.type === 'send-results') {
       // Calls answered together share one message, so the model sees them in one turn.
@@ -454,8 +638,8 @@
         ? Protocol.buildResultMessage({ id: results[0].id, ...results[0] })
         : Protocol.buildResultBatch(results);
       const key = results.map((result) => result.id).join('+');
-      pendingResults.set(key, Protocol.injectPrompt(body, config.env, { full: false, agents: !config.agent }));
-      resultQueue.push({ key, ids: results.map((result) => result.id), sessionId: message.sessionId });
+      pendingResults.set(key, Protocol.injectPrompt(body, config.env, { full: false, agents: !config.agent, ...planFlags(message.sessionId) }));
+      resultQueue.push({ key, ids: results.map((result) => result.id), sessionId: message.sessionId, files: filesOf(results) });
       pumpResults();
     }
   });

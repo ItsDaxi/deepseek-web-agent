@@ -20,7 +20,65 @@ const SKIPPED_FOLDERS = new Set(['.git', 'node_modules', '.hg', '.svn', '__pycac
 // Searches never open these. Reading one by its exact path goes through approval instead.
 const SENSITIVE_FILE = /(^|[\\/])(\.env(\.[^\\/]*)?|\.netrc|\.npmrc|\.pypirc|id_(rsa|dsa|ecdsa|ed25519)|credentials(\.[^\\/]*)?|[^\\/]*\.(pem|key|pfx|p12))$|(^|[\\/])(\.ssh|\.aws|\.gnupg)([\\/]|$)/i;
 
+// Files the model cannot read as text but the chat can: DeepSeek's own upload turns a PDF or an Office document
+// into text, and reads the text in an image. `read` does not print these, it attaches them to the next message.
+const ATTACHMENT_TYPES = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  jfif: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  avif: 'image/avif',
+  apng: 'image/apng',
+  ico: 'image/x-icon',
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  epub: 'application/epub+zip',
+};
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
 class ToolError extends Error {}
+
+// The media type of a file `read` attaches instead of printing, or null for anything else.
+function attachmentType(file) {
+  const extension = path.extname(file).slice(1).toLowerCase();
+  return Object.prototype.hasOwnProperty.call(ATTACHMENT_TYPES, extension) ? ATTACHMENT_TYPES[extension] : null;
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Checks the file and describes it. The host sends the bytes itself once the call has finished.
+function attach(file, mime) {
+  let stats;
+  try {
+    stats = fs.statSync(file);
+  } catch {
+    throw new ToolError(`File not found: ${file}`);
+  }
+  if (stats.isDirectory()) throw new ToolError(`${file} is a folder. Use glob to list what is inside.`);
+  if (stats.size === 0) throw new ToolError(`${file} is empty.`);
+  if (stats.size > MAX_ATTACHMENT_BYTES) {
+    throw new ToolError(`${file} is too large to attach (${formatSize(stats.size)}). The limit is ${formatSize(MAX_ATTACHMENT_BYTES)}.`);
+  }
+  const name = path.basename(file);
+  return {
+    text: `Attached ${name} (${formatSize(stats.size)}, ${mime}) to this message. The chat reads it for you: look at it in the message that carries this result.`,
+    attachment: { path: file, name, mime, size: stats.size },
+  };
+}
 
 function resolvePath(target, cwd) {
   const base = cwd || os.homedir();
@@ -48,6 +106,8 @@ function readText(file) {
 function read({ path: target, cwd, offset, limit }) {
   if (!target) throw new ToolError('read needs a path.');
   const file = resolvePath(target, cwd);
+  const mime = attachmentType(file);
+  if (mime) return attach(file, mime);
   const text = readText(file);
   if (text === '') return `${file} is empty.`;
 
@@ -256,7 +316,10 @@ function runTool(request) {
   const tool = TOOLS[request.tool];
   try {
     if (!tool) throw new ToolError(`Unknown tool: ${request.tool}`);
-    return { status: 'ok', code: 0, output: tool(request) };
+    const value = tool(request);
+    // `read` answers with an object when the file is attached rather than printed.
+    if (typeof value === 'string') return { status: 'ok', code: 0, output: value };
+    return { status: 'ok', code: 0, output: value.text, attachment: value.attachment };
   } catch (error) {
     if (error instanceof ToolError || error.code) return { status: 'failed', code: 1, output: error.message };
     throw error;
@@ -265,4 +328,4 @@ function runTool(request) {
 
 if (!isMainThread) parentPort.postMessage(runTool(workerData));
 
-module.exports = { runTool, globToRegExp, SENSITIVE_FILE };
+module.exports = { runTool, globToRegExp, SENSITIVE_FILE, attachmentType, MAX_ATTACHMENT_BYTES };
